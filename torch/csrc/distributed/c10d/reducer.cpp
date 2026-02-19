@@ -48,7 +48,6 @@ class CpuTimer : public Timer {
   explicit CpuTimer(c10::Device /* unused */) {}
 
   std::optional<int64_t> measureDifference(Event start, Event end) override {
-    PROFILE_FUNCTION();
     int64_t start_time = getTimeRef(start);
     int64_t end_time = getTimeRef(end);
     // If cpu_end_time is not recorded in this iteration,

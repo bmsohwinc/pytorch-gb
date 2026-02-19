@@ -7,6 +7,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#include <chrono>
 
 #include <ATen/core/ivalue_inl.h>
 #include <c10/macros/Macros.h>
@@ -201,6 +202,9 @@ class TORCH_API Reducer {
   void reset_state();
 
  protected:
+
+  std::vector<int64_t> copy_times_us_;
+
   // Forward declaration.
   struct Bucket;
 

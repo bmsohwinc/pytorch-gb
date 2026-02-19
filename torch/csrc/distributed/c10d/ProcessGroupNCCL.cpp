@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <tuple>
 #include <utility>
+#include <chrono>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceType.h>
@@ -4465,7 +4466,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclAllReduce(
+        auto start = std::chrono::steady_clock::now();
+        std::cout << "bms#: ncclAllReduce,start," << start.time_since_epoch().count() << std::endl;
+        auto result = ncclAllReduce(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
@@ -4473,6 +4476,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
             ncclReduceOp,
             comm,
             stream.stream());
+        auto end = std::chrono::steady_clock::now();
+        std::cout << "bms#: ncclAllReduce,end," << end.time_since_epoch().count() << std::endl;
+        return result;
       },
       OpType::ALLREDUCE,
       opts.asyncOp,

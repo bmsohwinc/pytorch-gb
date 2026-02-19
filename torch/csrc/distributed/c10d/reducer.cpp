@@ -48,6 +48,7 @@ class CpuTimer : public Timer {
   explicit CpuTimer(c10::Device /* unused */) {}
 
   std::optional<int64_t> measureDifference(Event start, Event end) override {
+    PROFILE_FUNCTION();
     int64_t start_time = getTimeRef(start);
     int64_t end_time = getTimeRef(end);
     // If cpu_end_time is not recorded in this iteration,
@@ -897,8 +898,10 @@ void Reducer::mark_variable_ready(size_t variable_index) {
     mark_variable_ready_sparse(variable_index);
   } else {
     auto start = std::chrono::steady_clock::now();
+    std::cout << "bms#: mark_variable_ready_dense,start," << start.time_since_epoch().count() << std::endl;
     mark_variable_ready_dense(variable_index);
     auto end = std::chrono::steady_clock::now();
+    std::cout << "bms#: mark_variable_ready_dense,end," << end.time_since_epoch().count() << std::endl;
     copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
   }
 
@@ -1250,8 +1253,10 @@ void Reducer::initialize_buckets(
       // param layouts over time, but not messing with params after DDP
       // construction is already a documented constraint.
       auto start = std::chrono::steady_clock::now();
+      std::cout << "bms#: initialize_bucket_views,start," << start.time_since_epoch().count() << std::endl;
       initialize_bucket_views(bucket);
       auto end = std::chrono::steady_clock::now();
+      std::cout << "bms#: initialize_bucket_views,end," << end.time_since_epoch().count() << std::endl;
       copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     }
 
@@ -1767,8 +1772,10 @@ void Reducer::finalize_backward() {
       // the bucket essentially point to the same storage. As a result, once
       // the allreduce is done, the sparse grads are automatically updated.
       auto start = std::chrono::steady_clock::now();
+      std::cout << "bms#: finalize_bucket_dense,start," << start.time_since_epoch().count() << "\n";
       finalize_bucket_dense(bucket);
       auto end = std::chrono::steady_clock::now();
+      std::cout << "bms#: finalize_bucket_dense,end," << end.time_since_epoch().count() << "\n";
       copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     }
   }

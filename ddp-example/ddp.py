@@ -82,36 +82,36 @@ class Trainer:
         )
 
     def _run_epoch(self, epoch):
-        print(f"bms#: run_epoch,start,{time.time()}")
+        print(f"bms#: run_epoch,start,{time.monotonic_ns()}")
         self.train_data.sampler.set_epoch(epoch)
         for source, targets in self.train_data:
-            print(f"bms#: load_data_gpu,start,{time.time()}")
+            print(f"bms#: load_data_gpu,start,{time.monotonic_ns()}")
             source, targets = source.to(self.local_rank), targets.to(self.local_rank)
-            print(f"bms#: load_data_gpu,end,{time.time()}")
+            print(f"bms#: load_data_gpu,end,{time.monotonic_ns()}")
             t0 = time.perf_counter()
             ts_fwd = time.time()
 
-            print(f"bms#: forward_pass,start,{time.time()}")
+            print(f"bms#: forward_pass,start,{time.monotonic_ns()}")
             output = self.model(source)
-            print(f"bms#: forward_pass,end,{time.time()}")
-            print(f"bms#: compute_loss,start,{time.time()}")
+            print(f"bms#: forward_pass,end,{time.monotonic_ns()}")
+            print(f"bms#: compute_loss,start,{time.monotonic_ns()}")
             loss = F.mse_loss(output, targets)
-            print(f"bms#: compute_loss,end,{time.time()}")
+            print(f"bms#: compute_loss,end,{time.monotonic_ns()}")
 
             t1 = time.perf_counter()
             ts_bwd = time.time()
 
             self.optimizer.zero_grad()
-            print(f"bms#: backward_pass,start,{time.time()}")
+            print(f"bms#: backward_pass,start,{time.monotonic_ns()}")
             loss.backward()
-            print(f"bms#: backward_pass,end,{time.time()}")
+            print(f"bms#: backward_pass,end,{time.monotonic_ns()}")
 
             t2 = time.perf_counter()
             ts_opt = time.time()
 
-            print(f"bms#: optimizer,start,{time.time()}")
+            print(f"bms#: optimizer,start,{time.monotonic_ns()}")
             self.optimizer.step()
-            print(f"bms#: optimizer,end,{time.time()}")
+            print(f"bms#: optimizer,end,{time.monotonic_ns()}")
             t3 = time.perf_counter()
             ts_after = time.time()
 
@@ -128,13 +128,13 @@ class Trainer:
                     "total": t3 - t0,
                 }
             )
-        print(f"bms#: run_epoch,end,{time.time()}")
+        print(f"bms#: run_epoch,end,{time.monotonic_ns()}")
 
     def train(self, max_epochs):
-        print(f"bms#: main_train,start,{time.time()}")
+        print(f"bms#: main_train,start,{time.monotonic_ns()}")
         for epoch in range(max_epochs):
             self._run_epoch(epoch)
-        print(f"bms#: main_train,end,{time.time()}")
+        print(f"bms#: main_train,end,{time.monotonic_ns()}")
 
     def save_logs(self, num_params, run_id):
         log_dir = os.path.join("data", run_id)

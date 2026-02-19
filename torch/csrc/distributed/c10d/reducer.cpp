@@ -1814,7 +1814,7 @@ void Reducer::finalize_backward() {
   for (const auto copy_time : copy_times_us_) {
     total_copy_time += copy_time;
   }
-  cout << "bms#: DDP_BACKWARD: copy=" << total_copy_time << "us\n";
+  std::cout << "bms#: DDP_BACKWARD: copy=" << total_copy_time << "us\n";
   copy_times_us_.clear();
 }
 

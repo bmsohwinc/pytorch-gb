@@ -25,7 +25,24 @@ namespace {
 constexpr int kUnsetDivFactor = -1;
 
 struct AutoDumper {
-    ~AutoDumper() { ProfileTimer::dump_to_file("/tmp/profile_log.csv"); }
+    ~AutoDumper() { 
+      // 1. Get current time
+        auto now = std::chrono::system_clock::now();
+        auto in_time_t = std::chrono::system_clock::to_time_t(now);
+
+        // 2. Format as YYYYMMDD_HHMMSS
+        std::stringstream ss;
+        ss << "/tmp/profile_" 
+           << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S") 
+           << ".csv";
+
+        std::string filename = ss.str();
+        
+        // 3. Log to console so you know where it went
+        std::cout << "bms#: Finalizing logs to " << filename << std::endl;
+        
+        ProfileTimer::dump_to_file(filename);
+     }
 };
 static AutoDumper dumper; // Global instance
 

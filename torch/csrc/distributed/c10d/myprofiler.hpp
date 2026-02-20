@@ -70,4 +70,4 @@ private:
     const char* name;
 };
 
-#define MY_PROFILE() ProfileTimer timer_##__LINE__{__func__}
+#define PROFILE_FUNCTION() ProfileTimer timer_##__LINE__{__func__}

@@ -17,7 +17,7 @@ EXPO_END=$3
 MASTER_IP="IP1" # Replace with your Master's IP
 MASTER_PORT="29500"
 NNODES=2
-EPOCHS=20
+EPOCHS=2
 RUN_ID=$(date +"%Y%m%d_%H%M%S") # Generate timestamp ONCE here
 
 # Determine endpoint based on rank

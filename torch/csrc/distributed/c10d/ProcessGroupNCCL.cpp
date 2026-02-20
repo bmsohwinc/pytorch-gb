@@ -2698,8 +2698,8 @@ const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
 }
 
 void ProcessGroupNCCL::addEphemeralTimeout(
-  PROFILE_FUNCTION();
-    const std::chrono::milliseconds& timeout) {
+  const std::chrono::milliseconds& timeout) {
+      PROFILE_FUNCTION();
   std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
   ephemeralTimeoutActive_ += timeout;
 }
@@ -5026,10 +5026,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* unused */,
-
-  PROFILE_FUNCTION();
     std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
+      PROFILE_FUNCTION();
   C10_THROW_ERROR(
       NotImplementedError,
       "ProcessGroupNCCL does not support allgather_coalesced");

@@ -21,4 +21,4 @@ private:
     const char* name;
 };
 
-#define PROFILE_FUNCTION() ProfileTimer timer(__FUNCTION__)
+#define PROFILE_FUNCTION() ProfileTimer timer_##__LINE__{__FUNCTION__}

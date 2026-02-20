@@ -24,6 +24,11 @@ namespace {
 
 constexpr int kUnsetDivFactor = -1;
 
+struct AutoDumper {
+    ~AutoDumper() { ProfileTimer::dump_to_file("/tmp/profile_log.csv"); }
+};
+static AutoDumper dumper; // Global instance
+
 // Macro that wraps TORCH_CHECK with DDP logging.
 #define REDUCER_CHECK(cond, logger_, ...)             \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {               \

@@ -28,17 +28,17 @@ private:
     }
 
 public:
-    static std::vector<LogEntry>& get_local_logs() {
-        // static thread_local std::vector<LogEntry> local_vec;
-        // static thread_local bool registered = false;
+    // static std::vector<LogEntry>& get_local_logs() {
+    //     // static thread_local std::vector<LogEntry> local_vec;
+    //     // static thread_local bool registered = false;
         
-        // if (!registered) {
-        //     std::lock_guard<std::mutex> lock(get_registry_mutex());
-        //     get_all_thread_logs().push_back(&local_vec);
-        //     registered = true;
-        // }
-        // return local_vec;
-    }
+    //     // if (!registered) {
+    //     //     std::lock_guard<std::mutex> lock(get_registry_mutex());
+    //     //     get_all_thread_logs().push_back(&local_vec);
+    //     //     registered = true;
+    //     // }
+    //     // return local_vec;
+    // }
 
     explicit ProfileTimer(const char* func_name) : name(func_name) {
         auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();

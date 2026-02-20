@@ -33,6 +33,7 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/myprofiler.hpp>
 #include <torch/torch.h>
 #include <optional>
 
@@ -60,6 +61,7 @@ const std::map<ReduceOp::RedOpType, ncclRedOp_t> ncclOp = {
 };
 
 inline bool isUnsupportedFloat8(at::ScalarType t) {
+  PROFILE_FUNCTION();
   return (
       t == at::ScalarType::Float8_e5m2fnuz ||
       t == at::ScalarType::Float8_e4m3fnuz ||
@@ -75,6 +77,7 @@ template <typename T, ncclDataType_t dataType>
 ncclRedOpRAII unpackPreMulSum(
     const ReduceOp& reduceOp,
     const ncclComm_t& comm) {
+  PROFILE_FUNCTION();
   const auto* preMulSupplement =
       reinterpret_cast<NCCLPreMulSumSupplement*>(reduceOp.supplement_.get());
   ncclRedOp_t preMulSum{};
@@ -102,6 +105,7 @@ ncclRedOpRAII getNcclReduceOp(
     at::Tensor& input,
     const ncclDataType_t& dataType,
     const ncclComm_t& comm) {
+  PROFILE_FUNCTION();
   try {
     if (input.scalar_type() == at::kBool) {
       if (reduceOp == ReduceOp::SUM) {
@@ -181,6 +185,7 @@ std::string getKeySendRecv(int myRank, int peer) {
 
 // Get device from tensor
 inline at::Device getDevice(at::Tensor& tensor) {
+  PROFILE_FUNCTION();
   return tensor.device();
 }
 
@@ -201,17 +206,20 @@ void syncStream(
     at::Device& device,
     at::cuda::CUDAEvent& ncclEvent,
     at::cuda::CUDAStream& ncclStream) {
+  PROFILE_FUNCTION();
   ncclEvent.record(at::cuda::getCurrentCUDAStream(device.index()));
   ncclEvent.block(ncclStream);
 }
 
 std::string getNcclAbortedCommStoreKey(const std::string& ncclIdStr) {
+  PROFILE_FUNCTION();
   return std::string(kNCCLAbortedCommStoreKey) + ":" + ncclIdStr;
 }
 
 // Returns exception's what() given an exception_ptr instance.
 std::string getExceptionMsgFromExceptionPtr(
     const std::exception_ptr& exceptionPtr) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(exceptionPtr != nullptr);
   try {
     std::rethrow_exception(exceptionPtr);
@@ -223,6 +231,7 @@ std::string getExceptionMsgFromExceptionPtr(
 }
 
 inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
+  PROFILE_FUNCTION();
   // parentheses avoid some compiler warnings
   static const uint64_t min_version =
       (((uint64_t)2) << 32) + (((uint64_t)9) << 16) + ((uint64_t)6);
@@ -238,6 +247,7 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 // When TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK is set, all tensors (no
 // matter how they have been allocated) are registered with all NCCL comms.
 bool shouldAllCommunicatorsRegisterAllTensors() {
+  PROFILE_FUNCTION();
 #ifdef NCCL_HAS_COMM_REGISTER
   static const bool flag = [] {
     const bool flag =
@@ -290,6 +300,7 @@ std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
 static void cacheAllocatorRegisterHook(
     const c10::CachingDeviceAllocator::TraceEntry& te) {
+  PROFILE_FUNCTION();
   // Register after SEGMENT_ALLOC
   if (te.action_ !=
       c10::CachingDeviceAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
@@ -323,6 +334,7 @@ static void cacheAllocatorRegisterHook(
 
 static void cacheAllocatorDeregisterHook(
     const c10::CachingDeviceAllocator::TraceEntry& te) {
+  PROFILE_FUNCTION();
   // deregister before SEGMENT_FREE
   if (te.action_ !=
       c10::CachingDeviceAllocator::TraceEntry::Action::SEGMENT_FREE) {
@@ -351,6 +363,7 @@ static void cacheAllocatorDeregisterHook(
 }
 
 static void attachAllocatorHooks() {
+  PROFILE_FUNCTION();
   static auto flag [[maybe_unused]] = [] {
     // Attaching hooks fails if CUDACachingAllocator is not initialized, so
     // Init for CUDA is called (and is a no-op if CUDA is already
@@ -367,6 +380,7 @@ static void attachAllocatorHooks() {
 static std::
     unordered_map<std::string, std::unordered_map<std::string, std::string>>
     getNCCLCommDumpMap() {
+  PROFILE_FUNCTION();
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<
       std::string /* ncclUniqueID */,
@@ -396,6 +410,7 @@ static std::
 }
 
 void reset_nccl_trace() {
+  PROFILE_FUNCTION();
   FlightRecorderCUDA::get()->reset_all();
 }
 
@@ -403,6 +418,7 @@ std::string dump_nccl_trace(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
+  PROFILE_FUNCTION();
   auto ncclDumpMap = getNCCLCommDumpMap();
 #if defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
   for (const auto& [ncclUniqueIDStr, dump] : ncclDumpMap) {
@@ -414,6 +430,7 @@ std::string dump_nccl_trace(
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
+  PROFILE_FUNCTION();
   auto ncclDumpMap = getNCCLCommDumpMap();
   return FlightRecorderCUDA::get()->dump_json(
       ncclDumpMap, includeCollectives, onlyActive);
@@ -421,6 +438,7 @@ std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
+  PROFILE_FUNCTION();
   static std::optional<
       std::function<void(std::function<void(const std::string&)>)>>
       dumper(std::nullopt);
@@ -428,11 +446,13 @@ get_cpp_trace_dumper() {
 }
 
 gil_checker_t& get_gil_checker() {
+  PROFILE_FUNCTION();
   static gil_checker_t gil_checker = nullptr;
   return gil_checker;
 }
 
 static std::future<bool> launchAsyncGilCheck() {
+  PROFILE_FUNCTION();
   std::promise<bool> resultPromise;
   std::future<bool> resultFuture = resultPromise.get_future();
   TORCH_CHECK(get_gil_checker(), "Can't check GIL with null GIL checker");
@@ -460,6 +480,7 @@ thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 std::ostream& operator<<(
     std::ostream& output,
     const ProcessGroupNCCL::WorkNCCL& workNCCL) {
+  PROFILE_FUNCTION();
   std::string workInfo;
   workInfo = c10::str(
       "WorkNCCL(",
@@ -480,30 +501,36 @@ std::ostream& operator<<(
 /* Implementation of TensorShelf class */
 
 void TensorShelf::stash(std::vector<at::Tensor>& tensors) {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   tVector_.insert(tVector_.end(), tensors.begin(), tensors.end());
 }
 
 void TensorShelf::stash(TensorShelf& other) {
+  PROFILE_FUNCTION();
   std::vector<at::Tensor>& otherVec = other.get();
   this->stash(otherVec);
 }
 
 void TensorShelf::unstash() {
+  PROFILE_FUNCTION();
   this->clear();
 }
 
 bool TensorShelf::empty() {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   return tVector_.empty();
 }
 
 void TensorShelf::clear() {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   tVector_.clear();
 }
 
 std::vector<at::Tensor>& TensorShelf::get() {
+  PROFILE_FUNCTION();
   return tVector_;
 }
 
@@ -529,6 +556,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
       isP2P_(isP2P),
       timingEnabled_(enableTiming),
       distDebugLevel_(distDebugLevel) {
+  PROFILE_FUNCTION();
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
@@ -579,10 +607,12 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       trace_id_(w.trace_id_),
       trace_reset_epoch_(w.trace_reset_epoch_),
       distDebugLevel_(w.distDebugLevel_) {
+  PROFILE_FUNCTION();
   exception_ = w.exception_;
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
+  PROFILE_FUNCTION();
   if (!ncclComm_->isAborted()) {
     checkAndSetException();
   }
@@ -590,6 +620,7 @@ bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isStarted() {
+  PROFILE_FUNCTION();
   if (!ncclComm_->isAborted()) {
     checkAndSetException();
   }
@@ -597,10 +628,12 @@ bool ProcessGroupNCCL::WorkNCCL::isStarted() {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
+  PROFILE_FUNCTION();
   C10_THROW_ERROR(NotImplementedError, "WorkNCCL::isSuccess() is deprecated");
 }
 
 void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
+  PROFILE_FUNCTION();
   if (exception()) {
     // We already have an exception.
     return;
@@ -623,23 +656,27 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
 }
 
 const std::string& ProcessGroupNCCL::WorkNCCL::logPrefix() const {
+  PROFILE_FUNCTION();
   static std::string prefix = c10::str("[Rank ", rank_, "] ");
   return prefix;
 }
 
 void ProcessGroupNCCL::WorkNCCL::setException(
     std::exception_ptr exception_ptr) {
+      PROFILE_FUNCTION();
   std::unique_lock<std::mutex> lock(mutex_);
   exception_ = std::move(exception_ptr);
 }
 
 // Helper that checks if the NCCL kernels are completed on the GPUs
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
+  PROFILE_FUNCTION();
   checkAndSetException();
   return finishedGPUExecutionInternal();
 }
 
 bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
+  PROFILE_FUNCTION();
   // if timing is disabled we won't have allocated start events
   if (!timingEnabled_) {
     return false;
@@ -652,6 +689,7 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
+  PROFILE_FUNCTION();
   // Checking the work's corresponding CUDA event's status
   // It calls `cudaEventQuery` eventually. Although this seems to be a
   // non-blocking call, but we did notice hangs in the past. It can
@@ -666,6 +704,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     std::optional<std::chrono::milliseconds> timeout) {
+      PROFILE_FUNCTION();
   STATIC_SCOPED_WAIT_COUNTER(
       pytorch.wait_counter.ProcessGroupNCCL__checkTimeout);
   auto currentTimepoint = std::chrono::steady_clock::now();
@@ -706,6 +745,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 
 // Print the traceback of the collective at call time
 std::string ProcessGroupNCCL::WorkNCCL::getTraceback() const {
+  PROFILE_FUNCTION();
   // First step we get the corresponding record entry from FR, based on work's
   // trace_id_ and trace_reset_epoch_
   std::optional<FlightRecorderCUDA::Entry> entry =
@@ -729,6 +769,7 @@ std::string ProcessGroupNCCL::WorkNCCL::getTraceback() const {
 
 // Print the traceback of the collective at call time
 void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
+  PROFILE_FUNCTION();
   std::string tracebackStr = getTraceback();
   if (!tracebackStr.empty()) {
     LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
@@ -743,6 +784,7 @@ void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
 
 void ProcessGroupNCCL::WorkNCCL::handleException(
     ErrorHandlingMode errorHandling) {
+      PROFILE_FUNCTION();
   if (exception_) {
     auto exceptionMsg = c10::str(
         "Some NCCL operations have failed or timed out. Due to the ",
@@ -769,6 +811,7 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
+  PROFILE_FUNCTION();
   synchronizeStream();
   if (c10d::allow_inflight_collective_as_graph_input()) {
     c10d::unregister_work(
@@ -778,6 +821,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
+  PROFILE_FUNCTION();
   auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
   // Block the current stream on the NCCL stream
   ncclEndEvent_->block(currentStream);
@@ -788,6 +832,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
 
 // Same as calling synchronize() when blockingWait_ is false
 bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
+  PROFILE_FUNCTION();
   RECORD_PARAM_COMMS(
       std::make_tuple(static_cast<int64_t>(this->seq_), this->isP2P_), // seq
       std::make_tuple(pgUID_, pgDesc_), // PG name tuple
@@ -859,6 +904,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
 }
 
 void ProcessGroupNCCL::WorkNCCL::abort() {
+  PROFILE_FUNCTION();
   // dump before aborting for rcclexp
 #if defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
   auto dumpMap = ncclComm_->ncclCommDump();
@@ -894,6 +940,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       terminateProcessGroup_(false),
       local_id_(process_group_id++),
       intraNodeComm_(initIntraNodeComm()) {
+    PROFILE_FUNCTION();
   TORCH_CHECK_WITH(
       ValueError,
       at::cuda::getNumGPUs() != 0,
@@ -1029,6 +1076,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 }
 
 void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
+  PROFILE_FUNCTION();
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
             << device;
@@ -1037,6 +1085,7 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
 }
 
 bool ProcessGroupNCCL::useNonblocking() {
+  PROFILE_FUNCTION();
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   return false;
 #endif // NCCL_HAS_COMM_NONBLOCKING
@@ -1073,6 +1122,7 @@ bool ProcessGroupNCCL::useNonblocking() {
 }
 
 void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
+  PROFILE_FUNCTION();
   // If our backend doesn't support splitting, this is a no-op for
   // ranks not in the new subgroup (and ranks that would be in it will
   // just use a new communicator rather than split).
@@ -1092,6 +1142,7 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 }
 
 bool ProcessGroupNCCL::isInitialized() {
+  PROFILE_FUNCTION();
   if (devNCCLCommMap_.empty()) {
     return false;
   }
@@ -1107,11 +1158,13 @@ bool ProcessGroupNCCL::isInitialized() {
 }
 
 ErrorType ProcessGroupNCCL::getError() {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(errorMutex_);
   return error_;
 }
 
 void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
+  PROFILE_FUNCTION();
   using c10::cuda::CUDACachingAllocator::SegmentInfo;
   const auto key = std::to_string(pool->device());
   LOG(INFO) << logPrefix()
@@ -1156,6 +1209,7 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
 }
 
 void ProcessGroupNCCL::deregisterMemPool(at::cuda::MemPool* pool) {
+  PROFILE_FUNCTION();
   const auto key = std::to_string(pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer deregistration for all buffers in "
@@ -1194,6 +1248,7 @@ void ProcessGroupNCCL::deregisterMemPool(at::cuda::MemPool* pool) {
 
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
+  PROFILE_FUNCTION();
   using IntraNodeComm = intra_node_comm::IntraNodeComm;
   if (!IntraNodeComm::isEnabled()) {
     return nullptr;
@@ -1208,14 +1263,17 @@ c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
+  PROFILE_FUNCTION();
 } // NCCL just starts sequence numbers at 0.
 
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
+  PROFILE_FUNCTION();
   return seqCollective_;
 }
 
 void ProcessGroupNCCL::registerOnCompletionHook(
     std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
+  PROFILE_FUNCTION();
   TORCH_WARN_ONCE(
       "ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder. "
       "Please check out FlightRecorder.hpp for information that is recorded at work completion. "
@@ -1239,6 +1297,7 @@ void ProcessGroupNCCL::registerOnCompletionHook(
 
 // must release GIL when calling this method
 void ProcessGroupNCCL::waitForPendingWorks() {
+  PROFILE_FUNCTION();
   // Reasoning about hook completion:
   // 1. waitForPendingWorks should be called after user code has finished
   // calling
@@ -1275,6 +1334,7 @@ void ProcessGroupNCCL::waitForPendingWorks() {
 }
 
 void ProcessGroupNCCL::enableCollectivesTiming() {
+  PROFILE_FUNCTION();
   enableTiming_.store(true);
 }
 
@@ -1282,6 +1342,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
     const c10::intrusive_ptr<Store>& store,
     const std::vector<int>& ranks,
     const c10::intrusive_ptr<Backend::Options>& opts) {
+  PROFILE_FUNCTION();
   auto deviceIdx = guessDeviceId();
   TORCH_CHECK(
       deviceIdx >= 0,
@@ -1330,6 +1391,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
     const c10::intrusive_ptr<Backend::Options>& opts,
     const int& rank,
     const int& size) {
+  PROFILE_FUNCTION();
   auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
   TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
@@ -1343,6 +1405,7 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
     const std::string& futDescription,
     ::c10d::C10dLoggingData& debugLog,
     bool throwException) {
+  PROFILE_FUNCTION();
   std::string errorMsg;
   bool complete = false;
 
@@ -1399,6 +1462,7 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
 void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,
     const std::optional<std::string>& abortReason) {
+  PROFILE_FUNCTION();
   // The process may control multiple devices, loop through the communicators on
   // each device
   // NCCL expects Group abort when there are multiple communicators created in a
@@ -1437,6 +1501,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
 // method calls `abortComms` but does more destruction than the latter.
 bool ProcessGroupNCCL::abortComms(
     const std::optional<std::string>& abortReason) {
+  PROFILE_FUNCTION();
   // Remove record from global ncclCommMemPoolMapMutex before aboarting,
   // so that a new cache segment would not register to already aborted
   // communicators. Note that ncclCommMemPoolMap is a global container which may
@@ -1456,6 +1521,7 @@ bool ProcessGroupNCCL::abortComms(
 }
 
 void ProcessGroupNCCL::dumpExtraDebuggingInfo() {
+  PROFILE_FUNCTION();
   // This extra dump is intended to capture the current snapshot of collectives
   // When this process group is terminated for some exception out of NCCL
   bool dumpExtraOnExec_ = getCvarBool(TORCH_NCCL_EXTRA_DUMP_ON_EXEC, false);
@@ -1481,6 +1547,7 @@ void ProcessGroupNCCL::dumpExtraDebuggingInfo() {
 
 // Abort this backend.
 void ProcessGroupNCCL::abort() {
+  PROFILE_FUNCTION();
   // This will log counter for how long the abort actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__abort);
 
@@ -1514,6 +1581,7 @@ void ProcessGroupNCCL::abort() {
 
 // Destroy (shutdown) this backend -- normal exit.
 void ProcessGroupNCCL::shutdown() {
+  PROFILE_FUNCTION();
   LOG(INFO) << logPrefix()
             << "Starting to destroy process group, flushing operations.";
   // Flush all collectives
@@ -1565,6 +1633,7 @@ void ProcessGroupNCCL::shutdown() {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
+  PROFILE_FUNCTION();
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
   // `shutdown()` or `abort` already called. Skip the favor of disposing
@@ -1620,6 +1689,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 bool ProcessGroupNCCL::dumpDebuggingInfo(
     bool includeStackTrace /*=true*/,
     bool onlyActive /*=false*/) {
+  PROFILE_FUNCTION();
   // This will log counter for how long dumpDebuggingInfo actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__dumpDebuggingInfo);
 
@@ -1650,6 +1720,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(
 }
 
 void ProcessGroupNCCL::terminateProcess(const std::string& errMsg) {
+  PROFILE_FUNCTION();
   // Logging with `FATAL`, after errMsg printed, it calls `std::abort()`
   // to terminate the program execution.
   LOG(FATAL) << logPrefix() << errMsg;
@@ -1658,16 +1729,19 @@ void ProcessGroupNCCL::terminateProcess(const std::string& errMsg) {
 static long computeDeltaMS(
     std::chrono::time_point<std::chrono::steady_clock> start,
     std::chrono::time_point<std::chrono::steady_clock> end) {
+  PROFILE_FUNCTION();
   return std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
       .count();
 }
 
 void ProcessGroupNCCL::setEnableNanCheck(bool enableNanCheck) {
+  PROFILE_FUNCTION();
   enableNanCheck_ = enableNanCheck;
 }
 
 std::string ProcessGroupNCCL::HeartbeatMonitor::getNCCLWatchdogTimeoutErrorMsg(
     const std::string& extraMsg) {
+  PROFILE_FUNCTION();
   return c10::str(
       pg_->logPrefix(),
       "Received a dump signal due to a collective timeout from ",
@@ -1687,6 +1761,7 @@ std::string ProcessGroupNCCL::HeartbeatMonitor::getNCCLWatchdogTimeoutErrorMsg(
 
 std::string ProcessGroupNCCL::HeartbeatMonitor::getNCCLWatchdogTimeoutExitMsg(
     const std::string& exitReason) {
+  PROFILE_FUNCTION();
   return c10::str(
       pg_->logPrefix(),
       "Terminating the process after attempting to dump debug info, due to ",
@@ -1696,16 +1771,19 @@ std::string ProcessGroupNCCL::HeartbeatMonitor::getNCCLWatchdogTimeoutExitMsg(
 
 void ProcessGroupNCCL::HeartbeatMonitor::setLastWorkListUpdateTime(
     std::chrono::time_point<std::chrono::steady_clock> time) {
+  PROFILE_FUNCTION();
   // We intentionally let the race condition to happen but this is ok
   // as long as we update the time, we know we are making progress.
   lastWorkListUpdateTime_ = time;
 }
 
 int ProcessGroupNCCL::HeartbeatMonitor::getDumpTimeout() const {
+  PROFILE_FUNCTION();
   return waitTimeoutDumpInMilSec_;
 }
 
 ProcessGroupNCCL::HeartbeatMonitor::HeartbeatMonitor(ProcessGroupNCCL* pg) {
+  PROFILE_FUNCTION();
   pg_ = pg;
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
@@ -1738,11 +1816,13 @@ ProcessGroupNCCL::HeartbeatMonitor::HeartbeatMonitor(ProcessGroupNCCL* pg) {
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::stop() {
+  PROFILE_FUNCTION();
   terminateHeartbeatMonitorThread_.store(true);
   monitorWakeUpCV_.notify_one();
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::start() {
+  PROFILE_FUNCTION();
   TORCH_CHECK(
       !ncclHeartbeatMonitorThread_.joinable(),
       "HeartbeatMonitor thread already started");
@@ -1751,6 +1831,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::start() {
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::join() {
+  PROFILE_FUNCTION();
   if (ncclHeartbeatMonitorThread_.joinable()) {
     ncclHeartbeatMonitorThread_.join();
     LOG(INFO) << pg_->logPrefix()
@@ -1759,6 +1840,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::join() {
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
+  PROFILE_FUNCTION();
   c10::setThreadName("pt_nccl_heartbt");
   STATIC_SCOPED_WAIT_COUNTER(
       pytorch.ProcessGroupNCCL__HeartbeatMonitor__runLoop);
@@ -2049,6 +2131,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
 }
 
 ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
+  PROFILE_FUNCTION();
   pg_ = pg;
   heartbeat_ = 1ULL;
   rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
@@ -2076,16 +2159,19 @@ ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
 }
 
 void ProcessGroupNCCL::Watchdog::notify() {
+  PROFILE_FUNCTION();
   workMetaListCV_.notify_one();
 }
 
 void ProcessGroupNCCL::Watchdog::start() {
+  PROFILE_FUNCTION();
   TORCH_CHECK(
       !ncclCommWatchdogThread_.joinable(), "Watchdog thread already started");
   ncclCommWatchdogThread_ = std::thread(&ProcessGroupNCCL::Watchdog::run, this);
 }
 
 void ProcessGroupNCCL::Watchdog::join() {
+  PROFILE_FUNCTION();
   if (ncclCommWatchdogThread_.joinable()) {
     ncclCommWatchdogThread_.join();
     LOG(INFO) << pg_->logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
@@ -2093,6 +2179,7 @@ void ProcessGroupNCCL::Watchdog::join() {
 }
 
 void ProcessGroupNCCL::Watchdog::run() {
+  PROFILE_FUNCTION();
   c10::setThreadName("pt_nccl_watchdg");
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__Watchdog__run);
 
@@ -2143,6 +2230,7 @@ void ProcessGroupNCCL::Watchdog::run() {
 int ProcessGroupNCCL::Watchdog::getSignalSrcRank(
     c10::intrusive_ptr<Store>& store,
     const std::string& signal) {
+  PROFILE_FUNCTION();
   // This function is 'non blocking'. We first 'check' if the key exists in the
   // store, then read/get the value only if the key exists.
   int srcRank = -1;
@@ -2174,6 +2262,7 @@ int ProcessGroupNCCL::Watchdog::getSignalSrcRank(
 }
 
 void ProcessGroupNCCL::Watchdog::checkAndSetRemoteError() {
+  PROFILE_FUNCTION();
   // if the error is already set, no need to check again
   if (pg_->getError() != ErrorType::SUCCESS) {
     return;
@@ -2193,6 +2282,7 @@ void ProcessGroupNCCL::Watchdog::checkAndSetRemoteError() {
 }
 
 void ProcessGroupNCCL::Watchdog::runLoop() {
+  PROFILE_FUNCTION();
   bool done = false;
   pg_->heartbeatMonitor_->setLastWorkListUpdateTime(
       std::chrono::steady_clock::now());
@@ -2455,10 +2545,12 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
 }
 
 uint64_t ProcessGroupNCCL::Watchdog::getHeartbt() const {
+  PROFILE_FUNCTION();
   return heartbeat_.load();
 }
 
 void ProcessGroupNCCL::Watchdog::setDesyncDebug(bool desyncDebug) {
+  PROFILE_FUNCTION();
   desyncDebug_ = desyncDebug;
 }
 
@@ -2469,6 +2561,7 @@ void ProcessGroupNCCL::DesyncDebugger::init(
     int globalRank,
     int pgId,
     c10::intrusive_ptr<Store> store) {
+  PROFILE_FUNCTION();
   rank_ = rank;
   size_ = size;
   globalRank_ = globalRank;
@@ -2481,6 +2574,7 @@ void ProcessGroupNCCL::DesyncDebugger::init(
 
 // Run desync debug. This function is called by watchdog at time of timeout.
 void ProcessGroupNCCL::DesyncDebugger::run() {
+  PROFILE_FUNCTION();
   if (!enabled_)
     return;
   auto logPrefix = c10::str("Rank ", rank_);
@@ -2520,6 +2614,7 @@ void ProcessGroupNCCL::DesyncDebugger::run() {
 
 // Log work start to store.
 void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
+  PROFILE_FUNCTION();
   if (!enabled_)
     return;
   if (work.startTraceUpdated_)
@@ -2533,6 +2628,7 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
 
 // Log work end to store.
 void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
+  PROFILE_FUNCTION();
   if (!enabled_)
     return;
 
@@ -2558,6 +2654,7 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
 // we are creating a new sub-PG, all ranks have to call the API at the same
 // time, and this makes `group_name` a unique identifier for a group (PG).
 std::string ProcessGroupNCCL::createLogPrefix() const {
+  PROFILE_FUNCTION();
   if (!pg_desc_.empty() && pg_desc_ != "undefined") {
     return c10::str(
         "[PG ID ",
@@ -2575,19 +2672,23 @@ std::string ProcessGroupNCCL::createLogPrefix() const {
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
+  PROFILE_FUNCTION();
   return logPrefix_;
 }
 
 const int& ProcessGroupNCCL::globalRank() const {
+  PROFILE_FUNCTION();
   static int globalRank = rank_;
   return globalRank;
 }
 
 const c10::intrusive_ptr<Store>& ProcessGroupNCCL::globalStore() const {
+  PROFILE_FUNCTION();
   return globalStore_;
 }
 
 const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
+  PROFILE_FUNCTION();
   if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
     static std::vector<uint64_t> globalRanks(size_);
     std::iota(globalRanks.begin(), globalRanks.end(), 0);
@@ -2597,6 +2698,7 @@ const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
 }
 
 void ProcessGroupNCCL::addEphemeralTimeout(
+  PROFILE_FUNCTION();
     const std::chrono::milliseconds& timeout) {
   std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
   ephemeralTimeoutActive_ += timeout;
@@ -2605,6 +2707,7 @@ void ProcessGroupNCCL::addEphemeralTimeout(
 bool ProcessGroupNCCL::verifyWorkTimeoutForTest(
     const c10::intrusive_ptr<Work>& work,
     const std::chrono::milliseconds& timeout) {
+  PROFILE_FUNCTION();
   // Since collective returns a c10d::Work, we need to cast it to WorkNCCL.
   if (auto workNCCL = c10::dynamic_intrusive_pointer_cast<WorkNCCL>(work)) {
     // workNCCL is now a c10::intrusive_ptr<WorkNCCL>
@@ -2618,6 +2721,7 @@ void ProcessGroupNCCL::broadcastSignal(
     c10::intrusive_ptr<Store>& store,
     const std::string& signal,
     int srcRank) {
+  PROFILE_FUNCTION();
   try {
     auto vec = std::vector<uint8_t>(
         reinterpret_cast<uint8_t*>(&srcRank),
@@ -2632,6 +2736,7 @@ void ProcessGroupNCCL::broadcastSignal(
 }
 
 void ProcessGroupNCCL::broadcastDumpSignal() {
+  PROFILE_FUNCTION();
   // broadcast dump signal to all other global ranks.
   broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
   // signal the local rank to start dumping
@@ -2655,6 +2760,7 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
 // For ranks [4, 5, 6], root rank is 4 and index is 1.
 // For ranks [7, 8, 9], root rank is 7 and index is 2.
 static int getRootIndex(const int rank, const int nRanks, const int nIds) {
+  PROFILE_FUNCTION();
   const int rmr = nRanks % nIds;
   const int rpr = nRanks / nIds;
   // For the first rmr roots, we assign one more rank to the root.
@@ -2669,6 +2775,7 @@ static int getRootIndex(const int rank, const int nRanks, const int nIds) {
 }
 
 void ProcessGroupNCCL::runHookLoop() {
+  PROFILE_FUNCTION();
   c10::setThreadName("pt_nccl_runhook");
 
   bool done = false;
@@ -2740,16 +2847,19 @@ void ProcessGroupNCCL::runHookLoop() {
 }
 
 std::exception_ptr ProcessGroupNCCL::WorkNCCL::checkForNCCLErrors() {
+  PROFILE_FUNCTION();
   return checkForNCCLErrorsInternal(ncclComm_);
 }
 
 std::exception_ptr ProcessGroupNCCL::checkForNCCLErrors(
     std::shared_ptr<NCCLComm>& ncclComm) {
+  PROFILE_FUNCTION();
   return checkForNCCLErrorsInternal(ncclComm);
 }
 
 std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
     std::shared_ptr<NCCLComm>& ncclComm) {
+  PROFILE_FUNCTION();
   // Prioritize commFailureReason over checkForNcclError() result if
   // commFailureReason is set.
   auto commFailureReason = ncclComm->getNcclCommFailureReason();
@@ -2784,6 +2894,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
     bool isSingleP2POp,
     const std::string& p2pKey,
     int p2pRank) {
+  PROFILE_FUNCTION();
   // For collective operations:
   // For every NCCL communicator that we create we need to broadcast
   // a unique ID from rank 0 to all other ranks. This broadcast is
@@ -2867,6 +2978,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
     int rootIdx,
     ncclUniqueId* ncclID,
     std::vector<ncclUniqueId>& ncclIDs) {
+  PROFILE_FUNCTION();
   std::vector<std::string> storeKeys;
   std::vector<std::vector<uint8_t>> results;
   RECORD_PARAM_COMMS(
@@ -2932,6 +3044,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
 }
 
 void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   if (devNCCLCommMap_.find(devNCCLCommMapKey) == devNCCLCommMap_.end()) {
     TORCH_INTERNAL_ASSERT(
@@ -2961,6 +3074,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     OpType opType,
     int p2pRank,
     bool isSendRecvSelf) {
+  PROFILE_FUNCTION();
   // Sanity check
   if (deviceKey.empty()) {
     C10_THROW_ERROR(
@@ -3240,6 +3354,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
 }
 
 int64_t ProcessGroupNCCL::getCommPtr() {
+  PROFILE_FUNCTION();
   // Get the collective communicator on the current CUDA device.
   auto device = at::Device(at::kCUDA, at::cuda::current_device());
   std::string deviceKey = getKeyFromDevice(device);
@@ -3256,6 +3371,7 @@ int64_t ProcessGroupNCCL::getCommPtr() {
 
 std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     const std::string& deviceKey) {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   if (devNCCLCommMap_.find(deviceKey) != devNCCLCommMap_.end()) {
     // Reuse the cached communicator if there is one.
@@ -3265,6 +3381,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
 }
 
 uint64_t ProcessGroupNCCL::getCommSplitCounter() const {
+  PROFILE_FUNCTION();
   uint64_t ret = 0;
   for (const auto& i : devNCCLCommMap_) {
     auto& ncclComm = i.second;
@@ -3280,6 +3397,7 @@ void check_gpu_single_tensor(
     const at::Tensor& tensor,
     const bool p2p = false // whether operation is a P2P operation
 ) {
+  PROFILE_FUNCTION();
   if (!tensor.is_cuda() || tensor.is_sparse()) {
     C10_THROW_ERROR(ValueError, "Tensors must be CUDA and dense");
   }
@@ -3310,6 +3428,7 @@ void check_gpu_single_tensor(
 // condition may be a challenge because the test would need to pass tensors on
 // different devices in the same process.
 int64_t check_gpu_tensors_same_device(const std::vector<at::Tensor>& tensors) {
+  PROFILE_FUNCTION();
   if (tensors.empty()) {
     C10_THROW_ERROR(ValueError, "Tensor list must be nonempty");
   }
@@ -3342,6 +3461,7 @@ int64_t check_gpu_tensors_same_device(const std::vector<at::Tensor>& tensors) {
 }
 
 bool check_same_size(const std::vector<at::Tensor>& input_tensors) {
+  PROFILE_FUNCTION();
   for (const auto& input_tensor : input_tensors) {
     if (!input_tensors[0].is_same_size(input_tensor)) {
       return false;
@@ -3361,6 +3481,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     const std::vector<at::Tensor>& inputs,
     const std::vector<at::Tensor>& outputs, // TODO(kwen2501): necessary?
     bool record) {
+  PROFILE_FUNCTION();
   auto r = c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(
       pg_uid_,
       pg_desc_,
@@ -3413,20 +3534,24 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
 
 // TODO(kwen2501): deprecate
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
+  PROFILE_FUNCTION();
   return *outputs_;
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
+  PROFILE_FUNCTION();
   return future_;
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFutureResult() {
+  PROFILE_FUNCTION();
   return futureWorkResult_;
 }
 
 float ProcessGroupNCCL::WorkNCCL::getDuration() const {
+  PROFILE_FUNCTION();
   TORCH_CHECK(timingEnabled_, "getDuration only works if timing was enabled");
   TORCH_CHECK(
       ncclStartEvent_,
@@ -3438,12 +3563,14 @@ float ProcessGroupNCCL::WorkNCCL::getDuration() const {
 }
 
 uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
+  PROFILE_FUNCTION();
   return seq_;
 }
 
 void ProcessGroupNCCL::assignTimeoutToWork(
     const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work,
     const c10::intrusive_ptr<ProcessGroupNCCL::Options>& option) {
+  PROFILE_FUNCTION();
   std::chrono::milliseconds timeout = option->timeout;
   std::lock_guard<std::mutex> timeoutLock(mtxTimeoutExtension_);
   if (ephemeralTimeoutActive_.count() > 0) {
@@ -3457,6 +3584,7 @@ void ProcessGroupNCCL::assignTimeoutToWork(
 
 void ProcessGroupNCCL::workEnqueue(
     const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
+  PROFILE_FUNCTION();
   // We clean up the TensorShelf's in case user hasn't called `work.wait()`.
   // This has nothing to do with new work enqueue. We are just using a place
   // that would be triggered by a next user call.
@@ -3494,10 +3622,12 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 
 uint64_t ProcessGroupNCCL::getWatchdogHeartbt() const {
+  PROFILE_FUNCTION();
   return watchdog_->getHeartbt();
 }
 
 void ProcessGroupNCCL::startCoalescing() {
+  PROFILE_FUNCTION();
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
   // ops bump seq_ only after initing a work they will collide with (reuse) the
   // seq_ of the last non-coalesced collective.  Previously, seq_ was bumped
@@ -3517,6 +3647,7 @@ void ProcessGroupNCCL::startCoalescing() {
 // `optype` is for specifying a composite optype, such as ALLGATHER and
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
+  PROFILE_FUNCTION();
   if (coalescedComm_ == nullptr) {
     // There is no actual work being coalesced, return here
     groupEnd();
@@ -3614,15 +3745,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
+  PROFILE_FUNCTION();
   // Default OpType to COALESCED if not specified
   return endCoalescing(OpType::COALESCED);
 }
 
 void ProcessGroupNCCL::startTimeEstimate() {
+  PROFILE_FUNCTION();
   groupStart();
 }
 
 float ProcessGroupNCCL::endTimeEstimate() {
+  PROFILE_FUNCTION();
 #ifdef NCCL_SIM_INFO_INITIALIZER
   ncclSimInfo_t simInfo = NCCL_SIM_INFO_INITIALIZER;
   C10D_NCCL_CHECK(ncclGroupSimulateEnd(&simInfo), std::nullopt);
@@ -3647,6 +3781,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     bool asyncOp,
     const char* profilingTitle,
     bool nanCheck) {
+  PROFILE_FUNCTION();
   // Environment setting by the user may add onto collective call's option
   nanCheck &= enableNanCheck_;
 
@@ -3846,6 +3981,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     OpType opType,
     bool asyncOp,
     const char* profilingTitle) {
+  PROFILE_FUNCTION();
   // Currently, the API permits one scenario where inputs.size() and
   // outputs.size() are > 0.
   // 1. If the call was a _coalesced call, all inputs must be on the same
@@ -4321,6 +4457,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     bool asyncOp,
     const char* profilingTitle,
     bool nanCheck) {
+  PROFILE_FUNCTION();
   auto inputs = std::vector<at::Tensor>{input};
   auto outputs = std::vector<at::Tensor>{output};
   return collective(
@@ -4344,6 +4481,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     bool asyncOp,
     const char* profilingTitle,
     bool nanCheck) {
+  PROFILE_FUNCTION();
   auto inputs = std::vector<at::Tensor>{input};
   auto outputs = std::vector<at::Tensor>{output};
   return collective(
@@ -4367,6 +4505,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     int peer,
     OpType opType,
     const char* profilingTitle) {
+  PROFILE_FUNCTION();
   return pointToPoint(
       tensor,
       fn,
@@ -4381,6 +4520,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
   TORCH_CHECK(
@@ -4456,6 +4596,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
     at::Tensor& tensor,
     const char* profilingTitle,
     const AllreduceOptions& opts) {
+  PROFILE_FUNCTION();
   return collective(
       tensor,
       tensor,
@@ -4488,6 +4629,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
   if (tensor.is_complex()) {
@@ -4536,6 +4678,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
+  PROFILE_FUNCTION();
   auto total_numel = check_gpu_tensors_same_device(tensors);
   TORCH_CHECK(
       !isUnsupportedFloat8(tensors.back().scalar_type()),
@@ -4589,6 +4732,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
   if (tensor.is_complex()) {
@@ -4650,6 +4794,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const BroadcastOptions& opts) {
+  PROFILE_FUNCTION();
   if (outputTensor.numel() != inputTensor.numel()) {
     C10_THROW_ERROR(
         ValueError,
@@ -4682,6 +4827,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
   if (tensor.is_complex()) {
@@ -4749,6 +4895,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceOptions& opts) {
+  PROFILE_FUNCTION();
   if (outputTensor.numel() != inputTensor.numel()) {
     C10_THROW_ERROR(
         ValueError,
@@ -4784,6 +4931,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(inputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto inputTensor = inputTensors.back();
   check_gpu_single_tensor(inputTensor);
@@ -4878,6 +5026,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* unused */,
+
+  PROFILE_FUNCTION();
     std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
   C10_THROW_ERROR(
@@ -4889,6 +5039,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
+  PROFILE_FUNCTION();
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
@@ -4932,6 +5083,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(outputTensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto outputTensor = outputTensors.back();
   check_gpu_single_tensor(outputTensor);
@@ -5037,6 +5189,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {
+  PROFILE_FUNCTION();
   if (inputTensor.dtype() != outputTensor.dtype()) {
     C10_THROW_ERROR(
         TypeError, "input tensor must be the same type as the output tensor.");
@@ -5116,6 +5269,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const ReduceScatterOptions& opts) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(
       !isUnsupportedFloat8(inputs.back().scalar_type()),
       "Unsupported Float8 type for NCCL reduction");
@@ -5172,6 +5326,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
 }
 
 c10::DeviceIndex ProcessGroupNCCL::guessDeviceId() const {
+  PROFILE_FUNCTION();
   // 1st choice: don't use this function if your API can take a device_id
   // argument.
   if (getBoundDeviceId().has_value()) {
@@ -5202,6 +5357,7 @@ c10::DeviceIndex ProcessGroupNCCL::guessDeviceId() const {
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
+  PROFILE_FUNCTION();
   RECORD_PARAM_COMMS(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
@@ -5274,6 +5430,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const AllToAllOptions& opts) {
+  PROFILE_FUNCTION();
   check_gpu_single_tensor(outputTensor);
   check_gpu_single_tensor(inputTensor);
   if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
@@ -5374,6 +5531,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& opts) {
+  PROFILE_FUNCTION();
   int64_t input_total_numel = 0;
   int64_t output_total_numel = 0;
   // considering uneven all2all bw calculation
@@ -5436,6 +5594,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int /* unused */) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
   check_gpu_single_tensor(tensor, true);
@@ -5484,6 +5643,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int /* unused */) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
   check_gpu_single_tensor(tensor, true);
@@ -5529,17 +5689,20 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
 }
 
 void ProcessGroupNCCL::groupStart() {
+  PROFILE_FUNCTION();
   C10D_NCCL_CHECK(ncclGroupStart(), std::nullopt);
   ++ncclActiveGroupCounter_;
 }
 
 void ProcessGroupNCCL::groupEnd() {
+  PROFILE_FUNCTION();
   C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
   --ncclActiveGroupCounter_;
 }
 
 void ProcessGroupNCCL::groupEndNonblocking(
     const std::shared_ptr<NCCLComm>& comm) {
+  PROFILE_FUNCTION();
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
 #else
@@ -5556,6 +5719,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
+  PROFILE_FUNCTION();
   static auto invalidArgument = [](const std::string& msg) {
     C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather: " + msg);
   };
@@ -5644,6 +5808,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
+  PROFILE_FUNCTION();
   static auto invalidArgument = [](const std::string& msg) {
     C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::scatter: " + msg);
   };
@@ -5733,6 +5898,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
+  PROFILE_FUNCTION();
   C10_THROW_ERROR(
       NotImplementedError, "ProcessGroupNCCL does not support recvAnysource");
 }
@@ -5741,6 +5907,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const AllgatherOptions& opts) {
+  PROFILE_FUNCTION();
   check_gpu_single_tensor(input_tensor);
   check_gpu_single_tensor(output_tensor);
 
@@ -5810,6 +5977,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
 
 // Allocate function
 static void* _ncclMemAlloc(size_t size, int device, void* stream) {
+  PROFILE_FUNCTION();
 #ifndef NCCL_HAS_MEM_ALLOC
   TORCH_CHECK(
       false, "NCCL mem allocator is not supported in this NCCL version");
@@ -5836,6 +6004,7 @@ static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
 
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
+  PROFILE_FUNCTION();
   C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
   c10::DeviceIndex deviceIdx = guessDeviceId();
   if (!supportsTensorAlloc(deviceIdx)) {
@@ -5850,6 +6019,7 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
 }
 
 bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+  PROFILE_FUNCTION();
   // Check if NCCL has `ncclMemAlloc` and `ncclMemFree` functions
   int version = 0;
   // Rely on link-time versioning
@@ -5868,6 +6038,7 @@ bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
 at::Tensor ProcessGroupNCCL::allocateTensor(
     long size,
     at::TensorOptions options) {
+  PROFILE_FUNCTION();
   // Some checks
   TORCH_CHECK_VALUE(options.has_device(), "Tensor options must include device");
   auto device = options.device();
@@ -5911,6 +6082,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
     const std::vector<int64_t>& ranks_to_exclude,
     int shrink_flags,
     const c10::intrusive_ptr<Backend::Options>& opts_override) {
+  PROFILE_FUNCTION();
   // Runtime version check with better error message
   auto runtime_version = torch::cuda::nccl::version();
   TORCH_CHECK(
@@ -6009,6 +6181,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
     const std::vector<int64_t>& /*ranks_to_exclude*/,
     int /*shrink_flags*/,
     const c10::intrusive_ptr<Backend::Options>& /*opts_override*/) {
+  PROFILE_FUNCTION();
   TORCH_CHECK(
       false,
       "ProcessGroupNCCL::shrink requires NCCL version 2.27.0 or later, "
@@ -6020,6 +6193,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
 void ProcessGroupNCCL::initializeDeviceStateForComm(
     const at::Device& device,
     std::shared_ptr<NCCLComm> comm) {
+  PROFILE_FUNCTION();
   const auto key = getKeyFromDevice(device);
   std::unique_lock<std::mutex> lock(mutex_);
   at::cuda::OptionalCUDAGuard gpuGuard(device);

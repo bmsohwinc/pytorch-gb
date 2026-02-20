@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
+#include <torch/csrc/distributed/c10d/myprofiler.hpp>
 #include <utility>
 
 namespace c10d {
@@ -122,6 +123,8 @@ Reducer::Reducer(
       first_bucket_bytes_cap_(first_bucket_bytes_cap),
       use_python_reducer_(use_python_reducer),
       bucket_bytes_cap_list_(std::move(bucket_bytes_cap_list)) {
+  
+  PROFILE_FUNCTION();
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
@@ -270,27 +273,33 @@ Reducer::Reducer(
 // be specified by calling `register_builtin_comm_hook` from Python API.
 
 Reducer::~Reducer() noexcept(false) {
+  PROFILE_FUNCTION();
   remove_autograd_hooks();
 }
 
 bool Reducer::dynamic_graph_find_unused() {
+  PROFILE_FUNCTION();
   return !static_graph_ && find_unused_parameters_;
 }
 
 bool Reducer::static_graph_first_iteration() {
+  PROFILE_FUNCTION();
   return static_graph_ && num_bwd_calls_ == 1;
 }
 
 bool Reducer::static_graph_after_first_iteration() {
+  PROFILE_FUNCTION();
   return static_graph_ && num_bwd_calls_ > 1;
 }
 
 bool Reducer::ddp_graph_static() {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   return ddp_graph_static_;
 }
 
 void Reducer::initialize_local_used_map() {
+  PROFILE_FUNCTION();
   const auto variable_count = params_.size();
   at::TensorOptions options;
   options = options.dtype(at::kInt);
@@ -312,6 +321,7 @@ void Reducer::initialize_local_used_map() {
 void Reducer::check_grad_layout(
     const at::Tensor& grad,
     const at::Tensor& bucket_view) {
+  PROFILE_FUNCTION();
   // Ensure that the gradient type matches the bucket type, or mixed precision
   // type if we are training with mixed precision.
   auto type = mixed_precision_param_dtype_
@@ -351,6 +361,7 @@ void Reducer::check_grad_layout(
 }
 
 void Reducer::mark_variable_ready_dense(size_t variable_index) {
+  PROFILE_FUNCTION();
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& variable = bucket.variables[bucket_index.intra_bucket_index];
@@ -439,6 +450,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
 }
 
 void Reducer::mark_variable_ready_sparse(size_t variable_index) {
+  PROFILE_FUNCTION();
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& variable = bucket.variables[bucket_index.intra_bucket_index];
@@ -488,6 +500,7 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
 
 std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
     bool return_zero_tensors) const {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   std::vector<c10d::GradBucket> gradBuckets;
   gradBuckets.reserve(buckets_.size());
@@ -511,17 +524,20 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
 void Reducer::set_forward_pass_work_handle(
     c10::intrusive_ptr<c10d::Work> forwardPassWorkHandle,
     bool useStaticWorldSize) {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);
   forwardPassWorkHandle_.useStaticWorldSize = useStaticWorldSize;
 }
 
 at::Tensor Reducer::get_local_used_map_on_device() const {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   return local_used_map_dev_;
 }
 
 void Reducer::push_rebuilt_params_for_all_indices() {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   if (!should_rebuild_buckets() || !rebuilt_param_indices_.empty()) {
     return;
@@ -533,11 +549,13 @@ void Reducer::push_rebuilt_params_for_all_indices() {
 }
 
 void Reducer::push_rebuilt_params(const size_t& index) {
+  PROFILE_FUNCTION();
   rebuilt_params_.push_back(params_[index]);
   rebuilt_param_indices_.push_back(static_cast<int64_t>(index));
 }
 
 void Reducer::set_divide_factor() {
+  PROFILE_FUNCTION();
   // If it was scheduled, wait on allreduce in forward pass that tells us
   // division factor based on no. of currently participating processes.
   if (div_factor_ == kUnsetDivFactor) {
@@ -560,6 +578,7 @@ void Reducer::set_divide_factor() {
 // This is called before training and converts the gradients to the dtype they
 // should be reduced in.
 void Reducer::set_mixed_precision_param_dtype(c10::ScalarType dtype) {
+  PROFILE_FUNCTION();
   mixed_precision_param_dtype_ = dtype;
   for (auto& bucket : buckets_) {
     bucket.gradients = bucket.gradients.to(dtype);
@@ -569,6 +588,7 @@ void Reducer::set_mixed_precision_param_dtype(c10::ScalarType dtype) {
 // Right now delay_all_reduce is only called when static_graph_=true and
 // num_iterations_==1.
 void Reducer::delay_all_reduce() {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(this->mutex_);
 
   if (should_collect_runtime_stats()) {
@@ -638,6 +658,7 @@ void Reducer::delay_all_reduce() {
 }
 
 void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
+  PROFILE_FUNCTION();
   logger_ = std::move(logger);
 }
 
@@ -645,6 +666,7 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // model parameter has been accumulated into its gradient tensor.
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(this->mutex_);
   if (!first_autograd_hook_called_) {
     first_autograd_hook_called_ = true;
@@ -732,6 +754,7 @@ void Reducer::autograd_hook(size_t index) {
 }
 
 void Reducer::all_reduce_local_used_map() {
+  PROFILE_FUNCTION();
   // See Note [Skip allreducing local_used_map_dev]
   // H2D from local_used_map_ to local_used_map_dev_
   if (local_used_map_dev_.is_cuda() || local_used_map_dev_.is_privateuseone()) {
@@ -793,6 +816,7 @@ void Reducer::all_reduce_local_used_map() {
 }
 
 at::Tensor& Reducer::get_param_from_index(size_t index) {
+  PROFILE_FUNCTION();
   const auto& bucket_index = variable_locators_[index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   // Cannot simply access variable via `bucket.variables[variable_index]` since
@@ -803,6 +827,7 @@ at::Tensor& Reducer::get_param_from_index(size_t index) {
 }
 
 void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
+  PROFILE_FUNCTION();
   // Something is wrong if all variables contained in this bucket have
   // already been marked as ready.
   // We don't expect the same variable to be marked ready twice.
@@ -872,6 +897,7 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
 }
 
 void Reducer::mark_variable_ready(size_t variable_index) {
+  PROFILE_FUNCTION();
   REDUCER_CHECK(
       variable_index < variable_locators_.size(),
       logger_,
@@ -896,12 +922,12 @@ void Reducer::mark_variable_ready(size_t variable_index) {
   if (bucket.expect_sparse_gradient) {
     mark_variable_ready_sparse(variable_index);
   } else {
-    auto start = std::chrono::steady_clock::now();
-    std::cout << "bms#: mark_variable_ready_dense,start," << start.time_since_epoch().count() << std::endl;
+    // auto start = std::chrono::steady_clock::now();
+    // std::cout << "bms#: mark_variable_ready_dense,start," << start.time_since_epoch().count() << std::endl;
     mark_variable_ready_dense(variable_index);
-    auto end = std::chrono::steady_clock::now();
-    std::cout << "bms#: mark_variable_ready_dense,end," << end.time_since_epoch().count() << std::endl;
-    copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+    // auto end = std::chrono::steady_clock::now();
+    // std::cout << "bms#: mark_variable_ready_dense,end," << end.time_since_epoch().count() << std::endl;
+    // copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
   }
 
   // TODO(@pietern): Make this work for both CPU/CUDA tensors.
@@ -941,6 +967,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
     GradBucket& grad_bucket) {
+  PROFILE_FUNCTION();
   if (comm_hook_ == nullptr) {
     return run_allreduce_hook(grad_bucket);
   } else {
@@ -950,11 +977,13 @@ c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
 
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_allreduce_hook(
     GradBucket& grad_bucket) {
+  PROFILE_FUNCTION();
   _AllReduceBySumCommHook allreduce_hook(process_group_);
   return allreduce_hook.runHook(grad_bucket);
 }
 
 void Reducer::all_reduce_bucket(Bucket& bucket) {
+  PROFILE_FUNCTION();
   auto variables_for_bucket = get_variables_for_bucket(next_bucket_, bucket);
   // TODO(@pietern): Ensure proper synchronization with the CUDA events
   // that recorded copies into this `gradients` tensor. If these copies are
@@ -981,6 +1010,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
 std::vector<at::Tensor> Reducer::get_variables_for_bucket(
     size_t bucket_index,
     const Bucket& bucket) const {
+  PROFILE_FUNCTION();
   // Check if we have cached mapping previously.
   if (has_rebuilt_bucket_ &&
       cached_variables_for_bucket_.find(bucket_index) !=
@@ -1011,6 +1041,7 @@ std::vector<at::Tensor> Reducer::get_variables_for_bucket(
 }
 
 bool Reducer::is_unused_bucket(Bucket& bucket) {
+  PROFILE_FUNCTION();
   for (const auto& variable_index : bucket.variable_indices) {
     if (std::find(
             unused_parameters_.begin(),
@@ -1023,11 +1054,13 @@ bool Reducer::is_unused_bucket(Bucket& bucket) {
 }
 
 bool Reducer::should_skip_all_reduce_bucket(Bucket& bucket) {
+  PROFILE_FUNCTION();
   return is_unused_bucket(bucket) && skip_all_reduce_unused_params_;
 }
 
 // Called when the bucket at the specified index is ready to be reduced.
 void Reducer::mark_bucket_ready(size_t bucket_index) {
+  PROFILE_FUNCTION();
   TORCH_INTERNAL_ASSERT(bucket_index >= next_bucket_);
 
   // Buckets are reduced in sequence. Ignore this bucket if
@@ -1055,6 +1088,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 
 void Reducer::install_futures(
     const c10::List<c10::intrusive_ptr<c10::ivalue::Future>>& futs) {
+  PROFILE_FUNCTION();
   // Append instead of overwrite so that this method can be called multiple
   // times in one iteration.
   if (!installed_futures_) {
@@ -1066,6 +1100,7 @@ void Reducer::install_futures(
 
 void Reducer::initialize_buckets(
     std::vector<std::vector<size_t>> bucket_indices) {
+  PROFILE_FUNCTION();
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
@@ -1251,12 +1286,12 @@ void Reducer::initialize_buckets(
       // Checking just once won't catch if someone messes with
       // param layouts over time, but not messing with params after DDP
       // construction is already a documented constraint.
-      auto start = std::chrono::steady_clock::now();
-      std::cout << "bms#: initialize_bucket_views,start," << start.time_since_epoch().count() << std::endl;
+      // auto start = std::chrono::steady_clock::now();
+      // std::cout << "bms#: initialize_bucket_views,start," << start.time_since_epoch().count() << std::endl;
       initialize_bucket_views(bucket);
-      auto end = std::chrono::steady_clock::now();
-      std::cout << "bms#: initialize_bucket_views,end," << end.time_since_epoch().count() << std::endl;
-      copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+      // auto end = std::chrono::steady_clock::now();
+      // std::cout << "bms#: initialize_bucket_views,end," << end.time_since_epoch().count() << std::endl;
+      // copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     }
 
     // Map participating variables to this bucket.
@@ -1276,6 +1311,7 @@ void Reducer::initialize_buckets(
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
 void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
+  PROFILE_FUNCTION();
   const auto& gradients = bucket.gradients;
   for (const auto i : c10::irange(bucket.variables.size())) {
     auto& v = bucket.variables[i];
@@ -1365,6 +1401,7 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
 void Reducer::populate_bucket_views_out(
     Reducer::Bucket& bucket,
     at::Tensor& tensor) {
+  PROFILE_FUNCTION();
   bucket.bucket_views_out.clear();
   for (const auto i : c10::irange(bucket.variables.size())) {
     const auto& v = bucket.variables[i];
@@ -1424,6 +1461,7 @@ void Reducer::populate_bucket_views_out(
 }
 
 void Reducer::prepare_for_forward() {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   num_iterations_++;
   if (should_collect_runtime_stats()) {
@@ -1432,6 +1470,7 @@ void Reducer::prepare_for_forward() {
 }
 
 void Reducer::reset_bucket_counting() {
+  PROFILE_FUNCTION();
   next_bucket_ = 0;
   // Reset num_buckets_ready_ at the beginning of backward computation
   // in each iteration.
@@ -1456,6 +1495,7 @@ void Reducer::reset_bucket_counting() {
 // want to start performing reductions on `torch.autograd.backward()`.
 void Reducer::search_unused_parameters(
     const std::vector<torch::autograd::Variable>& outputs) {
+  PROFILE_FUNCTION();
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
 
@@ -1536,6 +1576,7 @@ void Reducer::search_unused_parameters(
 
 void Reducer::prepare_for_backward(
     const std::vector<torch::autograd::Variable>& outputs) {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
 
   backward_compute_start_time_ = current_time_in_nanos();
@@ -1572,6 +1613,7 @@ void Reducer::copy_bucket_to_grad(
     Reducer::Bucket& bucket,
     size_t intra_bucket_index,
     bool global_unused) {
+  PROFILE_FUNCTION();
   const auto& bucket_view = bucket.bucket_views_out[intra_bucket_index];
   runGradCallbackForVariable(variable, [&](auto& grad) {
     // If a parameter is globally unused, we keep its grad untouched.
@@ -1593,6 +1635,7 @@ void Reducer::copy_bucket_to_grad(
 }
 
 std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
+  PROFILE_FUNCTION();
   std::vector<std::string> unMarkedParamNames;
   for (const auto& it : param_names_) {
     if (perIterationReadyParams_.find(it.first) ==
@@ -1604,6 +1647,7 @@ std::vector<std::string> Reducer::getUnmarkedParamsForIteration() {
 }
 
 std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
+  PROFILE_FUNCTION();
   std::vector<size_t> unmarked_param_indices;
   const auto variable_count = params_.size();
   for (const auto variable_index : c10::irange(variable_count)) {
@@ -1617,6 +1661,7 @@ std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
 
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
+  PROFILE_FUNCTION();
   for (const auto intra_bucket_index : c10::irange(bucket.variables.size())) {
     auto& variable = bucket.variables[intra_bucket_index];
 
@@ -1711,6 +1756,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 }
 
 void Reducer::finalize_backward() {
+  PROFILE_FUNCTION();
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
@@ -1770,12 +1816,12 @@ void Reducer::finalize_backward() {
       // We don't need to finalize the sparse bucket since the sparse grad and
       // the bucket essentially point to the same storage. As a result, once
       // the allreduce is done, the sparse grads are automatically updated.
-      auto start = std::chrono::steady_clock::now();
-      std::cout << "bms#: finalize_bucket_dense,start," << start.time_since_epoch().count() << "\n";
-      finalize_bucket_dense(bucket);
-      auto end = std::chrono::steady_clock::now();
-      std::cout << "bms#: finalize_bucket_dense,end," << end.time_since_epoch().count() << "\n";
-      copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+      // auto start = std::chrono::steady_clock::now();
+      // std::cout << "bms#: finalize_bucket_dense,start," << start.time_since_epoch().count() << "\n";
+      // finalize_bucket_dense(bucket);
+      // auto end = std::chrono::steady_clock::now();
+      // std::cout << "bms#: finalize_bucket_dense,end," << end.time_since_epoch().count() << "\n";
+      // copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     }
   }
 
@@ -1810,17 +1856,18 @@ void Reducer::finalize_backward() {
 
   sparse_metadata_.reset();
 
-  int64_t total_copy_time = 0;
-  for (const auto copy_time : copy_times_us_) {
-    total_copy_time += copy_time;
-  }
-  std::cout << "bms#: DDP_BACKWARD: copy=" << total_copy_time << "us\n";
-  copy_times_us_.clear();
+  // int64_t total_copy_time = 0;
+  // for (const auto copy_time : copy_times_us_) {
+  //   total_copy_time += copy_time;
+  // }
+  // std::cout << "bms#: DDP_BACKWARD: copy=" << total_copy_time << "us\n";
+  // copy_times_us_.clear();
 }
 
 void Reducer::runGradCallbackForVariable(
     at::Tensor& variable,
     const GradCallback& cb) {
+  PROFILE_FUNCTION();
 #ifdef _WIN32
   cb(variable.mutable_grad());
 #else
@@ -1836,6 +1883,7 @@ void Reducer::runGradCallbackForVariable(
 
 #ifndef _WIN32
 void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
+  PROFILE_FUNCTION();
   // We should set 'new_context_ptr' even if it's nullptr. That means the
   // reducer is under a local backward run.
   const auto new_context_raw_ptr = new_context_ptr.get();
@@ -1850,6 +1898,7 @@ void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
 
 void Reducer::sync_bucket_indices(
     std::vector<std::vector<size_t>>& bucket_indices) {
+  PROFILE_FUNCTION();
   auto num_buckets = bucket_indices.size();
   std::vector<size_t> bucket_sizes;
   bucket_sizes.reserve(num_buckets);
@@ -1931,6 +1980,7 @@ void Reducer::sync_bucket_indices(
 }
 
 bool Reducer::rebuild_buckets() {
+  PROFILE_FUNCTION();
   // Ensure reduction for previous backwards pass is finished. If user's model
   // has unused parameters for example, this will raise an error recommending to
   // run with find_unused_parameters=True, instead of the size mismatch
@@ -2019,6 +2069,7 @@ bool Reducer::rebuild_buckets() {
 }
 
 void Reducer::setSparseMetadata(std::map<std::string, at::Tensor>& metadata) {
+  PROFILE_FUNCTION();
   sparse_metadata_ =
       std::make_unique<std::map<std::string, at::Tensor>>(metadata);
 }
@@ -2036,6 +2087,7 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
 // See Note [DDP Communication Hook]
 void Reducer::register_builtin_comm_hook(
     c10d::BuiltinCommHookType comm_hook_type) {
+  PROFILE_FUNCTION();
   REDUCER_CHECK(
       comm_hook_ == nullptr,
       logger_,
@@ -2057,6 +2109,7 @@ void Reducer::register_builtin_comm_hook(
 }
 
 void Reducer::ensure_prior_reduction_finished() {
+  PROFILE_FUNCTION();
   // Check that any prior reduction has finished.
   // The variable `require_finalize_` is true until all gradients
   // have been computed and reduction of all buckets has been kicked off.
@@ -2153,14 +2206,17 @@ void Reducer::ensure_prior_reduction_finished() {
 }
 
 void Reducer::set_ddp_runtime_logging_sample_rate(int sample_rate) {
+  PROFILE_FUNCTION();
   ddp_runtime_logging_sample_rate_ = sample_rate;
 }
 
 int Reducer::get_ddp_runtime_logging_sample_rate() {
+  PROFILE_FUNCTION();
   return ddp_runtime_logging_sample_rate_;
 }
 
 bool Reducer::should_collect_runtime_stats() {
+  PROFILE_FUNCTION();
   if (num_iterations_ > 0 &&
       (num_iterations_ <= 10 ||
        num_iterations_ % get_ddp_runtime_logging_sample_rate() == 0)) {
@@ -2170,36 +2226,42 @@ bool Reducer::should_collect_runtime_stats() {
 }
 
 void Reducer::record_forward_compute_start_time() {
+  PROFILE_FUNCTION();
   if (timer_) {
     timer_->record(Timer::Event::kForwardStart);
   }
 }
 
 void Reducer::record_backward_compute_start_time() {
+  PROFILE_FUNCTION();
   if (timer_) {
     timer_->record(Timer::Event::kBackwardComputeStart);
   }
 }
 
 void Reducer::record_backward_compute_end_time() {
+  PROFILE_FUNCTION();
   if (timer_) {
     timer_->record(Timer::Event::kBackwardComputeEnd);
   }
 }
 
 void Reducer::record_backward_comm_start_time() {
+  PROFILE_FUNCTION();
   if (timer_) {
     timer_->record(Timer::Event::kBackwardCommStart);
   }
 }
 
 void Reducer::record_backward_comm_end_time() {
+  PROFILE_FUNCTION();
   if (timer_) {
     timer_->record(Timer::Event::kBackwardCommEnd);
   }
 }
 
 void Reducer::set_static_graph() {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   REDUCER_CHECK(
       num_iterations_ == 0,
@@ -2245,6 +2307,7 @@ compute_bucket_assignment_by_size(
     const std::vector<bool>& expect_sparse_gradient,
     const std::vector<int64_t>& tensor_indices,
     const std::optional<std::weak_ptr<c10d::Logger>>& logger) {
+  PROFILE_FUNCTION();
   // Either expect_sparse_gradient is not specified or it has as many elements
   // as the vector with tensors.
   TORCH_INTERNAL_ASSERT(
@@ -2370,6 +2433,7 @@ void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
     const std::optional<std::weak_ptr<c10d::Logger>>& logger) {
+  PROFILE_FUNCTION();
   // First verify number of parameters to avoid inconsistent inputs into
   // broadcast which can cause a crash.
   // See https://github.com/pytorch/pytorch/issues/73547
@@ -2478,6 +2542,7 @@ void verify_params_across_processes(
 }
 
 void Reducer::remove_autograd_hooks() {
+  PROFILE_FUNCTION();
   // Remove all hooks on variables registered by this Reducer. This is necessary
   // to make DDP failure recoverable. Otherwise, multiple Reducer instances
   // (from recoveries) will add their hooks to the original model, and those
@@ -2494,17 +2559,20 @@ void Reducer::remove_autograd_hooks() {
 }
 
 void Reducer::check_finalized() {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   ensure_prior_reduction_finished();
 }
 
 void Reducer::update_process_group(
     c10::intrusive_ptr<c10d::ProcessGroup> new_process_group) {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   process_group_ = std::move(new_process_group);
 }
 
 void Reducer::reset_state() {
+  PROFILE_FUNCTION();
   std::lock_guard<std::mutex> lock(mutex_);
   // Force rebuild of buckets.
   has_rebuilt_bucket_ = false;

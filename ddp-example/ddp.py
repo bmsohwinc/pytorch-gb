@@ -87,6 +87,7 @@ class Trainer:
         for source, targets in self.train_data:
             print(f"bms#: load_data_gpu,start,{time.monotonic_ns()}")
             source, targets = source.to(self.local_rank), targets.to(self.local_rank)
+            torch.cuda.synchronize()
             print(f"bms#: load_data_gpu,end,{time.monotonic_ns()}")
             t0 = time.perf_counter()
             ts_fwd = time.time()
@@ -98,6 +99,7 @@ class Trainer:
             loss = F.mse_loss(output, targets)
             print(f"bms#: compute_loss,end,{time.monotonic_ns()}")
 
+            torch.cuda.synchronize()
             t1 = time.perf_counter()
             ts_bwd = time.time()
 
@@ -106,11 +108,13 @@ class Trainer:
             loss.backward()
             print(f"bms#: backward_pass,end,{time.monotonic_ns()}")
 
+            torch.cuda.synchronize()
             t2 = time.perf_counter()
             ts_opt = time.time()
 
             print(f"bms#: optimizer,start,{time.monotonic_ns()}")
             self.optimizer.step()
+            torch.cuda.synchronize()
             print(f"bms#: optimizer,end,{time.monotonic_ns()}")
             t3 = time.perf_counter()
             ts_after = time.time()
@@ -120,7 +124,7 @@ class Trainer:
                     "epoch": epoch,
                     "ts_fwd": ts_fwd,
                     "ts_bwd": ts_bwd,
-                    "ts_opt": ts_before_opt if "ts_before_opt" in locals() else ts_opt,
+                    "ts_opt": ts_opt,
                     "ts_after": ts_after,
                     "fwd_time": t1 - t0,
                     "bwd_time": t2 - t1,

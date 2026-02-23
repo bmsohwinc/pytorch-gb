@@ -92,6 +92,7 @@ class CpuTimer : public Timer {
 C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer)
 
 std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
+  PROFILE_FUNCTION();
   if (result.isPyObject()) {
     return result.toPyObjectHolder()->extractTensors();
   }

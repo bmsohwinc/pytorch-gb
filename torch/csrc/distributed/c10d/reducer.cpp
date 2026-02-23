@@ -5,7 +5,10 @@
 
 #include <functional>
 
+#include <c10/core/DeviceGuard.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/StreamGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/hash.h>
@@ -896,8 +899,14 @@ void Reducer::mark_variable_ready(size_t variable_index) {
   if (bucket.expect_sparse_gradient) {
     mark_variable_ready_sparse(variable_index);
   } else {
+    if (bucket.gradients.is_cuda()) {
+      c10::cuda::getCurrentCUDAStream().synchronize();
+    }
     auto start = std::chrono::steady_clock::now();
     mark_variable_ready_dense(variable_index);
+    if (bucket.gradients.is_cuda()) {
+      c10::cuda::getCurrentCUDAStream().synchronize();
+    }
     auto end = std::chrono::steady_clock::now();
     copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
   }
@@ -1249,8 +1258,14 @@ void Reducer::initialize_buckets(
       // Checking just once won't catch if someone messes with
       // param layouts over time, but not messing with params after DDP
       // construction is already a documented constraint.
+      if (bucket.gradients.is_cuda()) {
+        c10::cuda::getCurrentCUDAStream().synchronize();
+      }
       auto start = std::chrono::steady_clock::now();
       initialize_bucket_views(bucket);
+      if (bucket.gradients.is_cuda()) {
+        c10::cuda::getCurrentCUDAStream().synchronize();
+      }
       auto end = std::chrono::steady_clock::now();
       copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     }
@@ -1766,8 +1781,14 @@ void Reducer::finalize_backward() {
       // We don't need to finalize the sparse bucket since the sparse grad and
       // the bucket essentially point to the same storage. As a result, once
       // the allreduce is done, the sparse grads are automatically updated.
+      if (bucket.gradients.is_cuda()) {
+        c10::cuda::getCurrentCUDAStream().synchronize();
+      }
       auto start = std::chrono::steady_clock::now();
       finalize_bucket_dense(bucket);
+      if (bucket.gradients.is_cuda()) {
+        c10::cuda::getCurrentCUDAStream().synchronize();
+      }
       auto end = std::chrono::steady_clock::now();
       copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     }
@@ -1808,7 +1829,7 @@ void Reducer::finalize_backward() {
   for (const auto copy_time : copy_times_us_) {
     total_copy_time += copy_time;
   }
-  cout << "bms#: DDP_BACKWARD: copy=" << total_copy_time << "us\n";
+  std::cout << "bms#: DDP_BACKWARD: copy=" << total_copy_time << "us\n";
   copy_times_us_.clear();
 }
 

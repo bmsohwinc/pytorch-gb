@@ -1,28 +1,14 @@
 # Use Ubuntu 22.04 Machines
-## install conda
+## install uv
 ```
-mkdir -p ~/miniconda3
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda3/miniconda.sh
-bash ~/miniconda3/miniconda.sh -b -u -p ~/miniconda3
-rm ~/miniconda3/miniconda.sh
-```
-
-## activate
-```
-source ~/miniconda3/bin/activate
-```
-
-## accept TOC
-```
-conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
-conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
 ```
 
 ## create project and activate
 ```
-conda init
-conda create -y -n p3
-conda activate p3
+uv venv p3
+source p3/bin/activate
 ```
 
 ## Install drivers
@@ -37,25 +23,24 @@ git submodule sync
 git submodule update --init --recursive
 ```
 
-## Upgrade pip to latest (25+)
+## Upgrade pip with uv (Optional but good for compatibility)
 ```
 sudo apt install -y python3-pip
-python -m pip install --upgrade pip
-pip -V
+uv pip install --upgrade pip
 ```
 
-## Install deps
+## Install deps using uv
 ```
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section above
-pip install --group dev
+uv pip install -r requirements.txt
 ```
 
-## Install more deps
+## Install more deps and build tools (cmake)
 ```
-pip install mkl-static mkl-include
+uv pip install cmake ninja mkl-static mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
-# magma installation: run with active conda environment. specify CUDA version to install
-.ci/docker/common/install_magma_conda.sh 12.4
+# magma installation: The original script uses conda. If you need it, you might have to build from source or use conda.
+# .ci/docker/common/install_magma_conda.sh 12.4
 
 # (optional) If using torch.compile with inductor/triton, install the matching version of triton
 # Run from the pytorch directory after cloning
@@ -63,17 +48,10 @@ pip install mkl-static mkl-include
 make triton
 ```
 
-## Install cmake
-```
-wget https://github.com/Kitware/CMake/releases/download/v4.2.3/cmake-4.2.3-linux-x86_64.sh
-sh ./cmake-4.2.3-linux-x86_64.sh 
-export PATH=/users/bmsb235/cmake-4.2.3-linux-x86_64/bin:$PATH
-```
-
 ## Install pytorch
 ```
-export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-python -m pip install --no-build-isolation -v -e .
+export CMAKE_PREFIX_PATH="${VIRTUAL_ENV}:${CMAKE_PREFIX_PATH}"
+uv pip install --no-build-isolation -v -e .
 
 ```
 

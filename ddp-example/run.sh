@@ -71,7 +71,7 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
         if [[ "$STANDALONE_FLAG" == "--standalone" ]]; then
           TORCHRUN_ARGS=(--standalone --nproc-per-node="$NPROC_PER_NODE")
         else
-          RDZV_ID="${RUN_ID}-gb-${gb_val}-param-${params}"
+          RDZV_ID="gb-${gb_val}-param-${params}"
           TORCHRUN_ARGS=(--nproc-per-node="$NPROC_PER_NODE" --nnodes="$NNODES" --node-rank="$NODE_RANK" \
                          --rdzv-id="$RDZV_ID" --rdzv-backend=c10d --rdzv-endpoint="$ENDPOINT")
         fi

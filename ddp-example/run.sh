@@ -76,5 +76,26 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
 
         # Short sleep to allow sockets to clear
         sleep 2
+
+        # Move tracefile in /tmp to /data dir
+        # summary: just find the latest non-empty profile_* file created after RUN_ID timestamp
+        mapfile -t traces < <(
+          find /tmp -maxdepth 1 -type f -name 'profile_*' -size +0c -printf '%f\n' 2>/dev/null \
+          | awk -v rid="$RUN_ID" '
+              /^profile_[0-9]{8}_[0-9]{6}/ {
+                ts = substr($0, 9, 15)  # YYYYMMDD_HHMMSS
+                if (ts > rid) print $0
+              }' \
+          | sort
+        )
+
+        if [ "${#traces[@]}" -gt 0 ]; then
+          latest="${traces[-1]}"   # pick latest after sort
+          src="/tmp/${latest}"
+          dst="./data/${RUN_ID}/profile-node-${NODE_RANK}-gb-${gb_val}-param-${params}.log"
+          mv -f "$src" "$dst"
+        else
+          echo "WARNING: No matching profile_* trace found for RUN_ID=$RUN_ID" >&2
+        fi
     done
 done

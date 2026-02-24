@@ -85,41 +85,58 @@ class Trainer:
         print(f"bms#: run_epoch,start,{time.monotonic_ns()}")
         self.train_data.sampler.set_epoch(epoch)
         for source, targets in self.train_data:
-            print(f"bms#: load_data_gpu,start,{time.monotonic_ns()}")
-            source, targets = source.to(self.local_rank), targets.to(self.local_rank)
-            print(f"bms#: load_data_gpu,end,{time.monotonic_ns()}")
+            # ---- H2D copy timing (accurate) ----
             torch.cuda.synchronize()
-            
-            t0 = time.perf_counter()
-            ts_fwd = time.time()
+            print(f"bms#: load_data_gpu,start,{time.monotonic_ns()}")
+            source = source.to(self.local_rank, non_blocking=True)
+            targets = targets.to(self.local_rank, non_blocking=True)
+            torch.cuda.synchronize()
+            print(f"bms#: load_data_gpu,end,{time.monotonic_ns()}")
 
-            print(f"bms#: forward_pass,start,{time.monotonic_ns()}")
+            # ---- Forward timing (accurate) ----
+            torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            ts_fwd = time.monotonic_ns()
+
+            print(f"bms#: forward_pass,start,{ts_fwd}")
             output = self.model(source)
+            torch.cuda.synchronize()
             print(f"bms#: forward_pass,end,{time.monotonic_ns()}")
+            t1 = time.perf_counter()
+
+            # ---- Loss timing (accurate) ----
+            torch.cuda.synchronize()
             print(f"bms#: compute_loss,start,{time.monotonic_ns()}")
             loss = F.mse_loss(output, targets)
+            torch.cuda.synchronize()
             print(f"bms#: compute_loss,end,{time.monotonic_ns()}")
-            torch.cuda.synchronize()
+            t_loss = time.perf_counter()
 
-            t1 = time.perf_counter()
-            ts_bwd = time.time()
-
+            # ---- Backward timing (accurate) ----
             self.optimizer.zero_grad()
-            print(f"bms#: backward_pass,start,{time.monotonic_ns()}")
-            loss.backward()
-            print(f"bms#: backward_pass,end,{time.monotonic_ns()}")
+
             torch.cuda.synchronize()
+            t1b = time.perf_counter()
+            ts_bwd = time.monotonic_ns()
 
+            print(f"bms#: backward_pass,start,{ts_bwd}")
+            loss.backward()
+            torch.cuda.synchronize()
+            print(f"bms#: backward_pass,end,{time.monotonic_ns()}")
             t2 = time.perf_counter()
-            ts_opt = time.time()
 
-            print(f"bms#: optimizer,start,{time.monotonic_ns()}")
+            # ---- Optimizer timing (accurate) ----
+            torch.cuda.synchronize()
+            t2b = time.perf_counter()
+            ts_opt = time.monotonic_ns()
+
+            print(f"bms#: optimizer,start,{ts_opt}")
             self.optimizer.step()
             torch.cuda.synchronize()
             print(f"bms#: optimizer,end,{time.monotonic_ns()}")
-            
             t3 = time.perf_counter()
-            ts_after = time.time()
+
+            ts_after = time.monotonic_ns()
 
             self.logs.append(
                 {
@@ -129,11 +146,13 @@ class Trainer:
                     "ts_opt": ts_opt,
                     "ts_after": ts_after,
                     "fwd_time": t1 - t0,
-                    "bwd_time": t2 - t1,
-                    "opt_time": t3 - t2,
+                    "loss_time": t_loss - t1,
+                    "bwd_time": t2 - t1b,
+                    "opt_time": t3 - t2b,
                     "total": t3 - t0,
                 }
             )
+
         print(f"bms#: run_epoch,end,{time.monotonic_ns()}")
 
     def train(self, max_epochs):

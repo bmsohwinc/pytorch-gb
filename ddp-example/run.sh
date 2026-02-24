@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Run as:
-# bash run.sh <node_id> <start_exponent> <end_exponent>
+# bash run.sh <node_id> <start_exponent> <end_exponent> <nproc_per_node> <standalone_flag>
 # node_id = 0 for master, 1 for worker, and so on
 # start_exponent = 1, 2, ... is starting parameter size treated as 2^start
 # end_exponent = 1, 2, ... is ending parameter size treated as 2^end
@@ -12,6 +12,10 @@
 NODE_RANK=$1  # Pass 0 for master, 1 for worker
 EXPO_START=$2
 EXPO_END=$3
+
+NPROC_PER_NODE=${4:-1}  # GPUs per node (single-node multi-GPU: set >1)
+STANDALONE_FLAG=${5:-}  # pass --standalone as 5th arg to run single-node
+
 
 # Configuration
 MASTER_IP="IP1" # Replace with your Master's IP
@@ -63,12 +67,15 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
         echo "------------------------------------------------"
 
 
-        torchrun --nproc-per-node=1 \
-                 --nnodes=$NNODES \
-                 --node-rank=$NODE_RANK \
-                 --rdzv-id=123 \
-                 --rdzv-backend=c10d \
-                 --rdzv-endpoint=$ENDPOINT \
+        # Build torchrun args: multi-node (default) vs single-node (--standalone)
+        if [[ "$STANDALONE_FLAG" == "--standalone" ]]; then
+          TORCHRUN_ARGS=(--standalone --nproc-per-node="$NPROC_PER_NODE")
+        else
+          TORCHRUN_ARGS=(--nproc-per-node="$NPROC_PER_NODE" --nnodes="$NNODES" --node-rank="$NODE_RANK" \
+                         --rdzv-id=123 --rdzv-backend=c10d --rdzv-endpoint="$ENDPOINT")
+        fi
+
+        torchrun "${TORCHRUN_ARGS[@]}" \
                  ddp.py $EPOCHS \
                  --num_params $params \
                  $bucket \

@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flame Graph Viewer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=IBM+Plex+Mono:wght@300;400;500&display=swap');
+
+  :root {
+    --bg:       #f5f5f7;
+    --bg2:      #ffffff;
+    --bg3:      #eaeaee;
+    --border:   #d0d0da;
+    --accent:   #3a4ddd;
+    --text:     #2a2a38;
+    --text-dim: #8888a0;
+    --text-hi:  #111120;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+  }
+
+  /* ── TOP BAR ── */
+  #topbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 14px;
+    height: 42px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .logo {
+    font-size: 13px; font-weight: 600; color: var(--text-hi);
+    letter-spacing: 0.08em; text-transform: uppercase; flex-shrink: 0;
+  }
+  .logo span { color: var(--accent); }
+  .tb-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+  .tb-btn {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 10px; cursor: pointer;
+    border-radius: 4px; font-family: inherit; font-size: 11px;
+    transition: border-color 0.15s, color 0.15s; flex-shrink: 0;
+  }
+  .tb-btn:hover { border-color: var(--accent); color: var(--text-hi); }
+  .tb-btn svg { width: 13px; height: 13px; }
+  .tb-label {
+    font-size: 11px; color: var(--text-dim);
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .tb-label input[type=number] {
+    width: 68px; background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); padding: 3px 7px; border-radius: 4px;
+    font-family: inherit; font-size: 11px; transition: border-color 0.15s;
+  }
+  .tb-label input[type=number]:focus { outline: none; border-color: var(--accent); }
+  #status {
+    font-size: 11px; color: var(--text-dim); margin-left: auto;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 360px;
+  }
+
+  /* ── TAB BAR ── */
+  #tabbar {
+    display: flex;
+    align-items: stretch;
+    padding: 0 8px;
+    height: 34px;
+    background: var(--bg3);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    user-select: none;
+    gap: 0;
+  }
+  #tabbar::-webkit-scrollbar { height: 0; }
+
+  .tab {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 10px 0 14px;
+    border-right: 1px solid var(--border);
+    cursor: pointer; font-size: 11px; color: var(--text-dim);
+    white-space: nowrap; background: transparent;
+    transition: background 0.1s, color 0.1s;
+    min-width: 80px; max-width: 200px;
+    position: relative;
+  }
+  .tab:first-of-type { border-left: 1px solid var(--border); }
+  .tab:hover { background: rgba(255,255,255,0.6); color: var(--text); }
+  .tab.active {
+    background: var(--bg2); color: var(--text-hi); font-weight: 500;
+    border-bottom: 2px solid var(--accent);
+  }
+  .tab-name { overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+  .tab-close {
+    flex-shrink: 0; width: 16px; height: 16px; border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 14px; line-height: 1;
+    transition: background 0.1s, color 0.1s;
+  }
+  .tab-close:hover { background: #ddd8e8; color: var(--text-hi); }
+
+  #tab-new {
+    display: flex; align-items: center; padding: 0 12px;
+    cursor: pointer; color: var(--text-dim); font-size: 20px; line-height: 1;
+    transition: color 0.1s; flex-shrink: 0;
+  }
+  #tab-new:hover { color: var(--accent); }
+
+  /* ── MAIN LAYOUT ── */
+  #main { display: flex; flex: 1; min-height: 0; }
+
+  /* ── GRAPHS PANEL ── */
+  #graphs-outer {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  #ruler-wrap {
+    flex-shrink: 0; height: 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+  #ruler { width: 100%; height: 100%; display: block; }
+
+  #graphs-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; }
+  #graphs-scroll::-webkit-scrollbar { width: 6px; }
+  #graphs-scroll::-webkit-scrollbar-track { background: var(--bg); }
+  #graphs-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  .pid-group { margin-bottom: 2px; }
+  .pid-header {
+    background: var(--bg2); border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 5px 12px; font-size: 10px; color: var(--text-dim);
+    letter-spacing: 0.1em; text-transform: uppercase; user-select: none;
+  }
+  .flame-canvas { display: block; }
+
+  /* empty state */
+  .empty-state {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    min-height: 320px; gap: 14px; color: var(--text-dim); padding: 40px;
+  }
+  .drop-zone {
+    border: 1px dashed var(--border); padding: 22px 44px;
+    border-radius: 6px; cursor: pointer;
+    transition: border-color 0.2s; text-align: center;
+  }
+  .drop-zone:hover, .drop-zone.over { border-color: var(--accent); }
+  .drop-zone svg { margin-bottom: 8px; opacity: 0.45; }
+  .drop-zone .big { font-size: 14px; color: var(--text); }
+  .drop-zone-hint { font-size: 11px; line-height: 1.7; text-align: center; }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    width: 268px; flex-shrink: 0;
+    background: var(--bg2); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #sidebar-header {
+    padding: 9px 14px; border-bottom: 1px solid var(--border);
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex; justify-content: space-between; align-items: center;
+    flex-shrink: 0;
+  }
+  #sidebar-header span { color: var(--accent); font-size: 10px; }
+  #func-list { flex: 1; overflow-y: auto; }
+  #func-list::-webkit-scrollbar { width: 4px; }
+  #func-list::-webkit-scrollbar-thumb { background: var(--border); }
+
+  .func-row {
+    display: flex; align-items: center;
+    padding: 5px 14px; border-bottom: 1px solid var(--bg3);
+    cursor: pointer; transition: background 0.1s;
+  }
+  .func-row:hover { background: var(--bg3); }
+  .func-row.active { background: #e8eaff; }
+  .func-swatch { width: 6px; height: 14px; border-radius: 2px; flex-shrink: 0; margin-right: 8px; }
+  .func-name {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; font-size: 11px; color: var(--text);
+  }
+  .func-stats { flex-shrink: 0; text-align: right; font-size: 10px; color: var(--text-dim); }
+  .func-stats .avg { color: var(--text); font-size: 11px; display: block; }
+
+  /* ── TOOLTIP ── */
+  #tooltip {
+    position: fixed; z-index: 1000;
+    background: #fff; border: 1px solid var(--border);
+    padding: 8px 12px; border-radius: 5px; font-size: 11px;
+    pointer-events: none; display: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+    max-width: 320px; word-break: break-all; line-height: 1.6;
+  }
+  #tooltip .tt-name { font-size: 12px; color: var(--text-hi); font-weight: 500; margin-bottom: 4px; }
+  #tooltip .tt-row { color: var(--text-dim); }
+  #tooltip .tt-row span { color: var(--text); }
+
+  /* ── STORAGE WARNING ── */
+  #storage-warn {
+    display: none; position: fixed; bottom: 14px; right: 14px; z-index: 999;
+    background: #fff8e8; border: 1px solid #e8c840; border-radius: 5px;
+    padding: 8px 14px; font-size: 11px; color: #7a6010;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.1); max-width: 320px;
+  }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <div class="logo">Flame<span>·</span>Viewer</div>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" id="btn-load">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M2 4h7l2 2h3v8H2V4z"/>
+    </svg>
+    Load JSON
+  </button>
+  <input type="file" id="file-in" accept=".json" style="display:none">
+  <div class="tb-sep"></div>
+  <label class="tb-label">
+    Min time
+    <input type="number" id="threshold" value="0" min="0" step="0.01" placeholder="ms">
+    ms
+  </label>
+  <div class="tb-sep"></div>
+  <button class="tb-btn" onclick="resetZoom()">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M2 8a6 6 0 1 0 6-6"/><path d="M2 4v4h4"/>
+    </svg>
+    Reset Zoom
+  </button>
+  <div id="status">no file loaded</div>
+</div>
+
+<!-- TAB BAR -->
+<div id="tabbar">
+  <div id="tab-new" title="New tab">+</div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <div id="graphs-outer">
+    <div id="ruler-wrap"><canvas id="ruler"></canvas></div>
+    <div id="graphs-scroll"></div>
+  </div>
+  <div id="sidebar">
+    <div id="sidebar-header">Functions <span id="func-count"></span></div>
+    <div id="func-list"></div>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+<div id="storage-warn"></div>
+
+<script>
+'use strict';
+
+// ── CONSTANTS ──
+const ROW_H    = 22;
+const TID_H    = 20;
+const PAD_BOT  = 8;
+const MIN_PX   = 0.5;
+const LS_INDEX = 'fg_tabs_v1';
+const LS_DATA  = 'fg_events_v1_';
+
+// ── GLOBAL REGISTRY ──
+// tabs: Map<id, TabState>
+const tabs = new Map();
+let activeTabId = null;
+let _tabCounter = 0;
+let pendingFileTabId = null;
+
+function uid() { return 't' + Date.now() + '_' + (++_tabCounter); }
+function getActiveTab() { return tabs.get(activeTabId) || null; }
+
+// ── COLOR ──
+const colorCache = {};
+function getColor(name) {
+  if (colorCache[name]) return colorCache[name];
+  let h = 5381;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h, 33) ^ name.charCodeAt(i);
+  h = (h >>> 0) % 360;
+  const s = 58 + ((h * 7) % 22), l = 52 + ((h * 13) % 14);
+  return (colorCache[name] = `hsl(${h},${s}%,${l}%)`);
+}
+function dimColor(name) {
+  let h = 5381;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h, 33) ^ name.charCodeAt(i);
+  h = (h >>> 0) % 360;
+  return `hsl(${h},18%,88%)`;
+}
+
+// ── PARSE ──
+function parseTrace(events) {
+  const stacks = {}, spans = [];
+  for (const e of events) {
+    if (e.ph !== 'B' && e.ph !== 'E') continue;
+    const key = `${e.pid}|${e.tid}`;
+    if (!stacks[key]) stacks[key] = [];
+    if (e.ph === 'B') {
+      stacks[key].push({ name: e.name || '(unnamed)', ts: e.ts, depth: stacks[key].length, pid: e.pid, tid: e.tid });
+    } else if (stacks[key].length) {
+      const b = stacks[key].pop();
+      spans.push({ name: b.name, start: b.ts, end: e.ts, dur: e.ts - b.ts, depth: b.depth, pid: b.pid, tid: b.tid });
+    }
+  }
+  return spans;
+}
+
+function buildGroups(spans) {
+  const byPid = {};
+  for (const s of spans) {
+    (byPid[s.pid] = byPid[s.pid] || {})[s.tid] = (byPid[s.pid][s.tid] || []);
+    byPid[s.pid][s.tid].push(s);
+  }
+  const result = {};
+  for (const pid of Object.keys(byPid).sort((a, b) => +a - +b)) {
+    const tids = byPid[pid];
+    const tidOrder = Object.keys(tids).sort((a, b) => +a - +b);
+    const tidDepth = {};
+    for (const tid of tidOrder) { let mx = 0; for (const s of tids[tid]) if (s.depth > mx) mx = s.depth; tidDepth[tid] = mx + 1; }
+    let totalH = PAD_BOT;
+    for (const tid of tidOrder) totalH += TID_H + tidDepth[tid] * ROW_H;
+    result[pid] = { tids, tidOrder, tidDepth, totalH };
+  }
+  return result;
+}
+
+function computeStats(tab) {
+  const m = {};
+  for (const s of tab.spans) {
+    if (s.dur < tab.threshold) continue;
+    if (!m[s.name]) m[s.name] = { total: 0, cnt: 0 };
+    m[s.name].total += s.dur; m[s.name].cnt++;
+  }
+  return Object.entries(m).map(([n, { total, cnt }]) => ({ name: n, avg: total / cnt, cnt })).sort((a, b) => b.avg - a.avg);
+}
+
+// ── FORMAT ──
+function fmtUs(us) {
+  if (us < 1000) return us.toFixed(1) + ' µs';
+  if (us < 1e6)  return (us / 1000).toFixed(3) + ' ms';
+  return (us / 1e6).toFixed(4) + ' s';
+}
+function fmtRuler(us) {
+  if (us === 0) return '0';
+  if (us < 1000) return us.toFixed(0) + 'µ';
+  if (us < 1e6)  return (us / 1000).toFixed(us < 10000 ? 2 : 1) + 'm';
+  return (us / 1e6).toFixed(3) + 's';
+}
+
+// ── RENDER RULER ──
+function renderRuler(tab) {
+  const canvas = document.getElementById('ruler');
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+  if (!tab || !tab.spans.length) return;
+
+  const range = tab.viewEnd - tab.viewStart;
+  if (range <= 0) return;
+  const tgt = Math.max(2, Math.floor(W / 90));
+  const raw = range / tgt;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  let interval = mag;
+  for (const m of [1, 2, 5, 10]) { if (mag * m >= raw) { interval = mag * m; break; } }
+  const firstTick = Math.ceil(tab.viewStart / interval) * interval;
+
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.fillStyle = '#8888a0'; ctx.strokeStyle = '#d0d0da'; ctx.lineWidth = 1;
+  for (let t = firstTick; t <= tab.viewEnd; t += interval) {
+    const x = Math.round((t - tab.viewStart) / range * W) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, H - 8); ctx.lineTo(x, H); ctx.stroke();
+    ctx.fillText(fmtRuler(t - tab.totalStart), x + 3, H - 12);
+  }
+  ctx.strokeStyle = '#d0d0da';
+  ctx.beginPath(); ctx.moveTo(0, H - 0.5); ctx.lineTo(W, H - 0.5); ctx.stroke();
+}
+
+// ── RENDER PID CANVAS ──
+function renderPidCanvas(tab, pid) {
+  const { canvas, ctx } = tab.canvasMap[pid];
+  const W = canvas.width, H = canvas.height;
+  const g = tab.pidGroups[pid];
+  const range = tab.viewEnd - tab.viewStart;
+  const thr = tab.threshold;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#f5f5f7'; ctx.fillRect(0, 0, W, H);
+
+  let yOff = 0;
+  for (const tid of g.tidOrder) {
+    ctx.fillStyle = '#e8e8ef'; ctx.fillRect(0, yOff, W, TID_H);
+    ctx.fillStyle = '#8888a0'; ctx.font = '10px JetBrains Mono, monospace';
+    ctx.fillText(`thread ${tid}`, 8, yOff + 13);
+    yOff += TID_H;
+    ctx.font = '11px JetBrains Mono, monospace';
+    for (const s of g.tids[tid]) {
+      if (s.dur < thr) continue;
+      const x1 = (s.start - tab.viewStart) / range * W;
+      const x2 = (s.end   - tab.viewStart) / range * W;
+      const pw = x2 - x1;
+      if (pw < MIN_PX || x2 < 0 || x1 > W) continue;
+      const y1 = yOff + s.depth * ROW_H;
+      const dimmed = tab.highlightFn && s.name !== tab.highlightFn;
+      ctx.fillStyle = dimmed ? dimColor(s.name) : getColor(s.name);
+      ctx.fillRect(x1, y1, pw, ROW_H - 1);
+      if (!dimmed) { ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(x1, y1, 1, ROW_H - 1); }
+      if (pw > 18 && !dimmed) {
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.save(); ctx.beginPath(); ctx.rect(x1 + 2, y1, pw - 4, ROW_H - 1); ctx.clip();
+        ctx.fillText(s.name, x1 + 3, y1 + ROW_H - 7); ctx.restore();
+      }
+    }
+    yOff += g.tidDepth[tid] * ROW_H;
+  }
+}
+
+function renderAll(tab) {
+  if (!tab) tab = getActiveTab();
+  if (!tab) return;
+  renderRuler(tab);
+  for (const pid of Object.keys(tab.canvasMap)) renderPidCanvas(tab, pid);
+}
+
+// ── VIEW HELPERS ──
+function clampView(tab) {
+  const range = tab.viewEnd - tab.viewStart;
+  if (tab.viewStart < tab.totalStart) { tab.viewEnd = tab.totalStart + range; tab.viewStart = tab.totalStart; }
+  if (tab.viewEnd   > tab.totalEnd)   { tab.viewStart = tab.totalEnd - range; tab.viewEnd   = tab.totalEnd; }
+  if (tab.viewStart < tab.totalStart) tab.viewStart = tab.totalStart;
+  if (tab.viewEnd   > tab.totalEnd)   tab.viewEnd   = tab.totalEnd;
+}
+
+function resetZoom() {
+  const tab = getActiveTab(); if (!tab) return;
+  tab.viewStart = tab.totalStart; tab.viewEnd = tab.totalEnd;
+  renderAll(tab);
+}
+
+// ── HIT TEST ──
+function hitTest(tab, pid, cx, cy) {
+  const g = tab.pidGroups[pid];
+  const W = tab.canvasMap[pid].canvas.width;
+  const range = tab.viewEnd - tab.viewStart;
+  let yOff = 0;
+  for (const tid of g.tidOrder) {
+    yOff += TID_H;
+    for (const s of g.tids[tid]) {
+      if (s.dur < tab.threshold) continue;
+      const x1 = (s.start - tab.viewStart) / range * W;
+      const x2 = (s.end   - tab.viewStart) / range * W;
+      const y1 = yOff + s.depth * ROW_H;
+      if (cx >= x1 && cx <= x2 && cy >= y1 && cy < y1 + ROW_H) return s;
+    }
+    yOff += g.tidDepth[tid] * ROW_H;
+  }
+  return null;
+}
+
+// ── TOOLTIP ──
+function showTooltip(e, span, tab) {
+  const tt = document.getElementById('tooltip');
+  if (!span) { tt.style.display = 'none'; return; }
+  tt.style.display = 'block';
+  tt.style.left = (e.clientX + 14) + 'px';
+  tt.style.top  = (e.clientY - 8)  + 'px';
+  tt.innerHTML = `<div class="tt-name">${span.name}</div>
+    <div class="tt-row">duration&nbsp; <span>${fmtUs(span.dur)}</span></div>
+    <div class="tt-row">start&nbsp;&nbsp;&nbsp;&nbsp; <span>${fmtUs(span.start - tab.totalStart)}</span></div>
+    <div class="tt-row">pid/tid&nbsp;&nbsp; <span>${span.pid} / ${span.tid}</span></div>
+    <div class="tt-row">depth&nbsp;&nbsp;&nbsp;&nbsp; <span>${span.depth}</span></div>`;
+}
+function hideTooltip() { document.getElementById('tooltip').style.display = 'none'; }
+
+// ── SIDEBAR ──
+function renderSidebar(tab) {
+  const list = document.getElementById('func-list');
+  if (!tab || !tab.spans.length) {
+    list.innerHTML = ''; document.getElementById('func-count').textContent = ''; return;
+  }
+  const stats = computeStats(tab);
+  document.getElementById('func-count').textContent = stats.length;
+  list.innerHTML = '';
+  for (const { name, avg, cnt } of stats) {
+    const row = document.createElement('div');
+    row.className = 'func-row' + (tab.highlightFn === name ? ' active' : '');
+    row.innerHTML = `<div class="func-swatch" style="background:${getColor(name)}"></div>
+      <div class="func-name" title="${name}">${name}</div>
+      <div class="func-stats"><span class="avg">${fmtUs(avg)}</span>×${cnt}</div>`;
+    row.addEventListener('click', () => {
+      tab.highlightFn = tab.highlightFn === name ? null : name;
+      renderSidebar(tab); renderAll(tab);
+    });
+    list.appendChild(row);
+  }
+}
+
+// ── CANVAS EVENTS ──
+function attachCanvasEvents(tab, pid, canvas) {
+  let dragX = null, dragVS = null, dragVE = null;
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect  = canvas.getBoundingClientRect();
+    const range = tab.viewEnd - tab.viewStart;
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      // horizontal → pan
+      const shift = (e.deltaX / rect.width) * range;
+      tab.viewStart += shift; tab.viewEnd += shift;
+      clampView(tab); renderAll(tab); return;
+    }
+    // vertical → zoom
+    const xFrac  = (e.clientX - rect.left) / rect.width;
+    const factor = e.deltaY > 0 ? 1.18 : 1 / 1.18;
+    const newRange = Math.max(range * factor, 1);
+    const center = tab.viewStart + xFrac * range;
+    tab.viewStart = center - xFrac * newRange;
+    tab.viewEnd   = center + (1 - xFrac) * newRange;
+    clampView(tab); renderAll(tab);
+  }, { passive: false });
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    dragX = e.clientX; dragVS = tab.viewStart; dragVE = tab.viewEnd;
+    canvas.style.cursor = 'grabbing';
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (dragX === null) return;
+    const rect  = canvas.getBoundingClientRect();
+    const dx    = (e.clientX - dragX) / rect.width;
+    const range = dragVE - dragVS;
+    tab.viewStart = dragVS - dx * range;
+    tab.viewEnd   = dragVE - dx * range;
+    clampView(tab); renderAll(tab);
+  });
+  window.addEventListener('mouseup', () => {
+    if (dragX !== null) { dragX = null; canvas.style.cursor = 'crosshair'; }
+  });
+  canvas.addEventListener('mousemove', (e) => {
+    if (dragX !== null || tab.id !== activeTabId) return;
+    const rect = canvas.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const cy = (e.clientY - rect.top)  * (canvas.height / rect.height);
+    showTooltip(e, hitTest(tab, pid, cx, cy), tab);
+  });
+  canvas.addEventListener('mouseleave', hideTooltip);
+}
+
+// ── BUILD FLAME PANES ──
+function buildFlamePanes(tab) {
+  tab.pane.innerHTML = '';
+  tab.canvasMap = {};
+  for (const pid of Object.keys(tab.pidGroups)) {
+    const g = tab.pidGroups[pid];
+    const wrap = document.createElement('div'); wrap.className = 'pid-group';
+    const hdr  = document.createElement('div'); hdr.className = 'pid-header';
+    hdr.textContent = `PID ${pid}  ·  ${g.tidOrder.length} thread(s)`;
+    wrap.appendChild(hdr);
+    const canvas = document.createElement('canvas');
+    canvas.className = 'flame-canvas';
+    canvas.height = g.totalH; canvas.style.height = g.totalH + 'px';
+    wrap.appendChild(canvas);
+    tab.pane.appendChild(wrap);
+    tab.canvasMap[pid] = { canvas, ctx: canvas.getContext('2d') };
+    attachCanvasEvents(tab, pid, canvas);
+  }
+}
+
+// ── SHOW EMPTY PANE ──
+function buildEmptyPane(tab) {
+  tab.pane.innerHTML = `
+    <div class="empty-state">
+      <div class="drop-zone" id="dz-${tab.id}">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <div class="big">Drop JSON here or click to open</div>
+      </div>
+      <div class="drop-zone-hint">Chrome Trace Event format (ph: B/E) · up to 250k events</div>
+    </div>`;
+  document.getElementById('dz-' + tab.id).addEventListener('click', () => {
+    pendingFileTabId = tab.id;
+    document.getElementById('file-in').click();
+  });
+}
+
+// ── CREATE TAB ──
+function createTab(id, name, threshold) {
+  const tab = {
+    id, name,
+    spans: [], pidGroups: {}, canvasMap: {},
+    viewStart: 0, viewEnd: 1, totalStart: 0, totalEnd: 1,
+    threshold: threshold || 0,
+    highlightFn: null, pane: null,
+    status: 'no file loaded',
+  };
+  tabs.set(id, tab);
+
+  // tab button
+  const tabEl = document.createElement('div');
+  tabEl.className = 'tab';
+  tabEl.dataset.tabId = id;
+  tabEl.innerHTML = `<span class="tab-name" title="${name}">${name}</span><span class="tab-close" title="Close tab">×</span>`;
+  tabEl.addEventListener('click', (e) => {
+    if (e.target.classList.contains('tab-close')) { deleteTab(id); return; }
+    switchTab(id);
+  });
+  document.getElementById('tab-new').before(tabEl);
+
+  // pane
+  const pane = document.createElement('div');
+  pane.className = 'tab-pane';
+  pane.dataset.tabId = id;
+  document.getElementById('graphs-scroll').appendChild(pane);
+  tab.pane = pane;
+
+  buildEmptyPane(tab);
+  return tab;
+}
+
+// ── DELETE TAB ──
+function deleteTab(id) {
+  if (!tabs.has(id)) return;
+  const tab = tabs.get(id);
+  document.querySelector(`.tab[data-tab-id="${id}"]`)?.remove();
+  tab.pane?.remove();
+  tabs.delete(id);
+  try { localStorage.removeItem(LS_DATA + id); } catch (_) {}
+  persistIndex();
+
+  if (tabs.size === 0) {
+    activeTabId = null;
+    document.getElementById('threshold').value = 0;
+    document.getElementById('status').textContent = 'no file loaded';
+    renderSidebar(null);
+    resizeRuler(); renderRuler(null);
+    return;
+  }
+  if (activeTabId === id) switchTab([...tabs.keys()][0]);
+}
+
+// ── SWITCH TAB ──
+function switchTab(id) {
+  if (!tabs.has(id)) return;
+
+  // deactivate current
+  if (activeTabId && tabs.has(activeTabId)) {
+    const old = tabs.get(activeTabId);
+    old.pane?.classList.remove('active');
+    document.querySelector(`.tab[data-tab-id="${activeTabId}"]`)?.classList.remove('active');
+  }
+
+  activeTabId = id;
+  const tab = tabs.get(id);
+  tab.pane.classList.add('active');
+  document.querySelector(`.tab[data-tab-id="${id}"]`)?.classList.add('active');
+
+  // sync toolbar
+  document.getElementById('threshold').value = tab.threshold / 1000;
+  document.getElementById('status').textContent = tab.status;
+
+  renderSidebar(tab);
+  requestAnimationFrame(() => resizeCanvases(tab));
+}
+
+// ── LOAD DATA INTO TAB ──
+function loadDataIntoTab(tab, events, fileName) {
+  tab.status = 'parsing…';
+  if (tab.id === activeTabId) document.getElementById('status').textContent = tab.status;
+
+  setTimeout(() => {
+    const spans = parseTrace(events);
+    if (!spans.length) { tab.status = 'no spans found'; if (tab.id === activeTabId) document.getElementById('status').textContent = tab.status; return; }
+
+    let ts = Infinity, te = -Infinity;
+    for (const s of spans) { if (s.start < ts) ts = s.start; if (s.end > te) te = s.end; }
+
+    tab.spans      = spans;
+    tab.pidGroups  = buildGroups(spans);
+    tab.totalStart = ts; tab.totalEnd   = te;
+    tab.viewStart  = ts; tab.viewEnd    = te;
+    tab.highlightFn = null;
+
+    // rename
+    tab.name = fileName;
+    const tabEl = document.querySelector(`.tab[data-tab-id="${tab.id}"]`);
+    if (tabEl) { tabEl.querySelector('.tab-name').textContent = fileName; tabEl.querySelector('.tab-name').title = fileName; }
+
+    buildFlamePanes(tab);
+
+    const numPids = Object.keys(tab.pidGroups).length;
+    tab.status = `${events.length.toLocaleString()} events · ${spans.length.toLocaleString()} spans · ${numPids} PID(s)`;
+    if (tab.id === activeTabId) document.getElementById('status').textContent = tab.status;
+
+    renderSidebar(tab);
+    persistTab(tab, events);
+
+    if (tab.id === activeTabId) requestAnimationFrame(() => resizeCanvases(tab));
+  }, 10);
+}
+
+// ── RESIZE ──
+function resizeRuler() {
+  const canvas = document.getElementById('ruler');
+  const wrap   = document.getElementById('ruler-wrap');
+  canvas.width = wrap.clientWidth; canvas.height = wrap.clientHeight;
+}
+
+function resizeCanvases(tab) {
+  resizeRuler();
+  if (!tab) tab = getActiveTab();
+  if (!tab || !Object.keys(tab.canvasMap).length) { renderRuler(tab); return; }
+  const W = document.getElementById('graphs-scroll').clientWidth;
+  for (const { canvas } of Object.values(tab.canvasMap)) {
+    canvas.width = W; canvas.style.width = '100%';
+  }
+  renderAll(tab);
+}
+
+// ── LOCALSTORAGE ──
+function persistIndex() {
+  try {
+    localStorage.setItem(LS_INDEX, JSON.stringify(
+      [...tabs.values()].map(t => ({ id: t.id, name: t.name, threshold: t.threshold }))
+    ));
+  } catch (_) {}
+}
+
+function persistTab(tab, events) {
+  persistIndex();
+  if (!events || !events.length) return;
+  try {
+    localStorage.setItem(LS_DATA + tab.id, JSON.stringify(events));
+  } catch (_) {
+    showStorageWarn('File too large for localStorage — data won\'t survive page reload.');
+  }
+}
+
+function showStorageWarn(msg) {
+  const el = document.getElementById('storage-warn');
+  el.textContent = msg; el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 5000);
+}
+
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(LS_INDEX);
+    if (!raw) return false;
+    const idx = JSON.parse(raw);
+    if (!idx.length) return false;
+    for (const { id, name, threshold } of idx) {
+      const tab = createTab(id, name, threshold || 0);
+      const evRaw = localStorage.getItem(LS_DATA + id);
+      if (evRaw) {
+        const events = JSON.parse(evRaw);
+        loadDataIntoTab(tab, events, name);
+      }
+    }
+    switchTab(idx[0].id);
+    return true;
+  } catch (e) {
+    console.warn('localStorage restore failed', e);
+    return false;
+  }
+}
+
+// ── FILE HANDLING ──
+function handleFile(file, tabId) {
+  const tab = tabs.get(tabId); if (!tab) return;
+  tab.status = 'reading…';
+  if (tab.id === activeTabId) document.getElementById('status').textContent = tab.status;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try { loadDataIntoTab(tab, JSON.parse(ev.target.result), file.name); }
+    catch (err) { tab.status = 'JSON error: ' + err.message; if (tab.id === activeTabId) document.getElementById('status').textContent = tab.status; }
+  };
+  reader.readAsText(file);
+}
+
+// Load JSON button → new tab if active tab has data
+document.getElementById('btn-load').addEventListener('click', () => {
+  const active = getActiveTab();
+  if (!active || active.spans.length > 0) {
+    const t = createTab(uid(), 'untitled');
+    switchTab(t.id);
+    pendingFileTabId = t.id;
+  } else {
+    pendingFileTabId = active.id;
+  }
+  document.getElementById('file-in').click();
+});
+
+document.getElementById('file-in').addEventListener('change', function () {
+  const file = this.files[0]; if (!file) return;
+  const targetId = pendingFileTabId || (getActiveTab() || {}).id;
+  if (targetId) handleFile(file, targetId);
+  pendingFileTabId = null; this.value = '';
+});
+
+document.getElementById('tab-new').addEventListener('click', () => {
+  const t = createTab(uid(), 'untitled');
+  switchTab(t.id); persistIndex();
+});
+
+// drag-and-drop
+['dragenter','dragover'].forEach(ev => document.body.addEventListener(ev, (e) => { e.preventDefault(); document.querySelectorAll('.drop-zone').forEach(z => z.classList.add('over')); }));
+['dragleave','drop'].forEach(ev => document.body.addEventListener(ev, () => { document.querySelectorAll('.drop-zone').forEach(z => z.classList.remove('over')); }));
+document.body.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0]; if (!file) return;
+  const active = getActiveTab();
+  const target = (active && !active.spans.length) ? active : createTab(uid(), 'untitled');
+  switchTab(target.id);
+  handleFile(file, target.id);
+});
+
+// threshold input (per-tab)
+document.getElementById('threshold').addEventListener('change', function () {
+  const tab = getActiveTab(); if (!tab) return;
+  tab.threshold = parseFloat(this.value) * 1000 || 0;
+  renderSidebar(tab); renderAll(tab);
+  persistIndex();
+});
+
+// resize observer
+new ResizeObserver(() => resizeCanvases()).observe(document.getElementById('graphs-outer'));
+
+// ── INIT ──
+requestAnimationFrame(() => {
+  resizeRuler(); renderRuler(null);
+  if (!loadFromStorage()) {
+    const t = createTab(uid(), 'untitled');
+    switchTab(t.id);
+  }
+});
+</script>
+</body>
+</html>

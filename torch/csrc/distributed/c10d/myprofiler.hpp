@@ -61,6 +61,10 @@ public:
                 << entry.timestamp << ","
                 << entry.tid << "\n";
         }
+
+        int count = all_logs.size();
+        all_logs.clear();
+        std::cout << "bms#: Dumped " << count << " log entries to " << filename << " and cleared all logs.\n";
     }
 
 private:

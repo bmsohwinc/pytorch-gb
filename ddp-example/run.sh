@@ -71,8 +71,9 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
         if [[ "$STANDALONE_FLAG" == "--standalone" ]]; then
           TORCHRUN_ARGS=(--standalone --nproc-per-node="$NPROC_PER_NODE")
         else
+          RDZV_ID="${RUN_ID}-gb-${gb_val}-param-${params}"
           TORCHRUN_ARGS=(--nproc-per-node="$NPROC_PER_NODE" --nnodes="$NNODES" --node-rank="$NODE_RANK" \
-                         --rdzv-id=123 --rdzv-backend=c10d --rdzv-endpoint="$ENDPOINT")
+                         --rdzv-id="$RDZV_ID" --rdzv-backend=c10d --rdzv-endpoint="$ENDPOINT")
         fi
 
         torchrun "${TORCHRUN_ARGS[@]}" \
@@ -83,7 +84,7 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
                  --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
 
         # Short sleep to allow sockets to clear
-        sleep 2
+        sleep 4
 
         # Move tracefile in /tmp to /data dir
         # summary: just find the latest non-empty profile_* file created after RUN_ID timestamp

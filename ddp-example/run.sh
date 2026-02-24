@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Run as:
-# bash run.sh <node_id> <start_exponent> <end_exponent> <nproc_per_node> <standalone_flag>
+# bash run.sh <node_id> <start_exponent> <end_exponent> <nproc_per_node> <standalone_flag> <data_size>
 # node_id = 0 for master, 1 for worker, and so on
 # start_exponent = 1, 2, ... is starting parameter size treated as 2^start
 # end_exponent = 1, 2, ... is ending parameter size treated as 2^end
@@ -15,7 +15,7 @@ EXPO_END=$3
 
 NPROC_PER_NODE=${4:-1}  # GPUs per node (single-node multi-GPU: set >1)
 STANDALONE_FLAG=${5:-}  # pass --standalone as 5th arg to run single-node
-
+DATA_SIZE=${6:-1024}  # dataset size (number of samples), default to 1024 if not provided
 
 # Configuration
 MASTER_IP="IP1" # Replace with your Master's IP
@@ -60,10 +60,10 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
         gb_val=0
         if [[ "$bucket" == "--grad_as_bucket_view" ]]; then gb_val=1; fi
         mkdir -p ./data/${RUN_ID}
-        LOG_FILE="./data/${RUN_ID}/stdout-node-${NODE_RANK}-gb-${gb_val}-param-${params}.log"
+        LOG_FILE="./data/${RUN_ID}/stdout-node-${NODE_RANK}-gb-${gb_val}-param-${params}-data-${DATA_SIZE}.log"
 
         echo "------------------------------------------------"
-        echo "RANK $NODE_RANK: Running 2^$i ($params params), GradBucket=$gb_val, Log=$LOG_FILE"
+        echo "RANK $NODE_RANK: Running 2^$i ($params params), GradBucket=$gb_val, Log=$LOG_FILE, DataSize=$DATA_SIZE"
         echo "------------------------------------------------"
 
 
@@ -78,6 +78,7 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
         torchrun "${TORCHRUN_ARGS[@]}" \
                  ddp.py $EPOCHS \
                  --num_params $params \
+                 --data $DATA_SIZE \
                  $bucket \
                  --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
 
@@ -99,7 +100,7 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
         if [ "${#traces[@]}" -gt 0 ]; then
           latest="${traces[-1]}"   # pick latest after sort
           src="/tmp/${latest}"
-          dst="./data/${RUN_ID}/profile-node-${NODE_RANK}-gb-${gb_val}-param-${params}.log"
+          dst="./data/${RUN_ID}/profile-node-${NODE_RANK}-gb-${gb_val}-param-${params}-data-${DATA_SIZE}.log"
           mv -f "$src" "$dst"
         else
           echo "WARNING: No matching profile_* trace found for RUN_ID=$RUN_ID" >&2

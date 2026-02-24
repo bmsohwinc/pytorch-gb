@@ -161,12 +161,12 @@ class Trainer:
             self._run_epoch(epoch)
         print(f"bms#: main_train,end,{time.monotonic_ns()}")
 
-    def save_logs(self, num_params, run_id):
+    def save_logs(self, num_params, run_id, data_size):
         log_dir = os.path.join("data", run_id)
         os.makedirs(log_dir, exist_ok=True)
         gb_val = 1 if self.grad_bucket else 0
         filepath = os.path.join(
-            log_dir, f"node-{self.global_rank}-gb-{gb_val}-param-{num_params}.csv"
+            log_dir, f"node-{self.global_rank}-gb-{gb_val}-param-{num_params}-data-{data_size}.csv"
         )
 
         headers = [
@@ -183,6 +183,7 @@ class Trainer:
             "bwd_time",
             "opt_time",
             "total_time",
+            "data_size",
         ]
 
         with open(filepath, "w") as f:
@@ -191,7 +192,7 @@ class Trainer:
                 f.write(
                     f"{self.global_rank},{num_params},{self.num_layers},{gb_val},{e['epoch']},"
                     f"{e['ts_fwd']},{e['ts_bwd']},{e['ts_opt']},{e['ts_after']},"
-                    f"{e['fwd_time']},{e['bwd_time']},{e['opt_time']},{e['total']}\n"
+                    f"{e['fwd_time']},{e['bwd_time']},{e['opt_time']},{e['total']},{data_size}\n"
                 )
 
 
@@ -201,12 +202,13 @@ def main():
     parser.add_argument("--num_params", type=int, default=1000)
     parser.add_argument("--grad_as_bucket_view", action="store_true")
     parser.add_argument("--run_id", type=str, required=True)
+    parser.add_argument("--data", type=int, default=1024)  # dataset size (#samples)
     args = parser.parse_args()
 
     init_process_group(backend="nccl")
 
     model, num_layers, input_dim = build_model(args.num_params)
-    dataset = MyTrainDataset(1024, input_dim)
+    dataset = MyTrainDataset(args.data, input_dim)
     train_data = DataLoader(dataset, batch_size=32, sampler=DistributedSampler(dataset))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
@@ -216,7 +218,7 @@ def main():
 
     print(f"Starting DDP on device: {int(os.environ['LOCAL_RANK'])}")
     trainer.train(args.epochs)
-    trainer.save_logs(args.num_params, args.run_id)
+    trainer.save_logs(args.num_params, args.run_id, args.data)
     destroy_process_group()
 
 

@@ -83,8 +83,8 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
                  $bucket \
                  --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
 
-        # Short sleep to allow sockets to clear
-        sleep 4
+        # Sleep to allow sockets to clear
+        sleep 10
 
         # Move tracefile in /tmp to /data dir
         # summary: just find the latest non-empty profile_* file created after RUN_ID timestamp

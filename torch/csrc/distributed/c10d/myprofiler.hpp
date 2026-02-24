@@ -45,6 +45,7 @@ public:
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
             now.time_since_epoch()
         ).count();
+        std::lock_guard<std::mutex> lock(mtx);
         all_logs.push_back({std::this_thread::get_id(), name, "start", (long long)ns});
     }
 
@@ -53,6 +54,7 @@ public:
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
             now.time_since_epoch()
         ).count();
+        std::lock_guard<std::mutex> lock(mtx);
         all_logs.push_back({std::this_thread::get_id(), name, "end", (long long)ns});
     }
 

@@ -41,13 +41,19 @@ public:
     // }
 
     explicit ProfileTimer(const char* func_name) : name(func_name) {
-        auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-        all_logs.push_back({std::this_thread::get_id(), name, "start", (long long)now});
+        auto now = std::chrono::steady_clock::now();
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            now.time_since_epoch()
+        ).count();
+        all_logs.push_back({std::this_thread::get_id(), name, "start", (long long)ns});
     }
 
     ~ProfileTimer() {
-        auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-        all_logs.push_back({std::this_thread::get_id(), name, "end", (long long)now});
+        auto now = std::chrono::steady_clock::now();
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            now.time_since_epoch()
+        ).count();
+        all_logs.push_back({std::this_thread::get_id(), name, "end", (long long)ns});
     }
 
     static void dump_to_file(const std::string& filename) {

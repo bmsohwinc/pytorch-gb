@@ -4607,8 +4607,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        auto start = std::chrono::steady_clock::now();
-        std::cout << "bms#: ncclAllReduce,start," << start.time_since_epoch().count() << std::endl;
+        auto now = std::chrono::steady_clock::now();
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+          now.time_since_epoch()
+        ).count();
+        std::cout << "bms#: ncclAllReduce,start," << ns << std::endl;
         auto result = ncclAllReduce(
             input.data_ptr(),
             output.data_ptr(),
@@ -4618,7 +4621,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
             comm,
             stream.stream());
         auto end = std::chrono::steady_clock::now();
-        std::cout << "bms#: ncclAllReduce,end," << end.time_since_epoch().count() << std::endl;
+        auto end_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+          end.time_since_epoch()
+        ).count();
+        std::cout << "bms#: ncclAllReduce,end," << end_ns << std::endl;
         return result;
       },
       OpType::ALLREDUCE,

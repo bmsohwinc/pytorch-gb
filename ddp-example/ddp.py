@@ -209,8 +209,8 @@ def main():
     parser.add_argument("epochs", type=int)
     parser.add_argument("--num_params", type=int, default=1000)
     parser.add_argument("--grad_as_bucket_view", action="store_true")
-    parser.add_argument("--run_id", type=str, required=True)
     parser.add_argument("--data_size", type=int, default=1000)
+    parser.add_argument("--run_id", type=str, required=True)
     args = parser.parse_args()
 
     init_process_group(backend="nccl")

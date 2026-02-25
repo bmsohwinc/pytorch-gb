@@ -67,12 +67,12 @@ def build_model(target_params):
     return torch.nn.Sequential(*layers), depth, input_dim
 
 
-def build_profiler(run_id, num_layers, grad_bucket):
+def build_profiler(run_id, num_layers, grad_bucket, data_size):
     log_dir = os.path.join("data", run_id)
     os.makedirs(log_dir, exist_ok=True)
     gb_val = 1 if grad_bucket else 0
     tb_log_dir = os.path.join(
-        log_dir, f"profile-node-{dist.get_rank()}-gb-{gb_val}-layers-{num_layers}"
+        log_dir, f"profile-node-{dist.get_rank()}-gb-{gb_val}-layers-{num_layers}-data-{data_size}"
     )
 
     prof = profile(
@@ -108,33 +108,35 @@ class Trainer:
     def _run_epoch(self, epoch):
         rank = dist.get_rank() if dist.is_initialized() else 0
 
+        epoch_logs = []
+
         self.train_data.sampler.set_epoch(epoch)
         for source, targets in self.train_data:
             source, targets = source.to(self.local_rank), targets.to(self.local_rank)
-            torch.cuda.synchronize()
+            #torch.cuda.synchronize()
             t0 = time.perf_counter()
             ts_fwd = time.time()
 
             output = self.model(source)
             loss = F.mse_loss(output, targets)
 
-            torch.cuda.synchronize()
+            #torch.cuda.synchronize()
             t1 = time.perf_counter()
             ts_bwd = time.time()
 
             self.optimizer.zero_grad()
             loss.backward()
 
-            torch.cuda.synchronize()
+            #torch.cuda.synchronize()
             t2 = time.perf_counter()
             ts_opt = time.time()
 
             self.optimizer.step()
-            torch.cuda.synchronize()
+            #torch.cuda.synchronize()
             t3 = time.perf_counter()
             ts_after = time.time()
 
-            self.logs.append(
+            epoch_logs.append(
                 {
                     "epoch": epoch,
                     "ts_fwd": ts_fwd,
@@ -150,18 +152,30 @@ class Trainer:
 
             self.profiler.step()  # Advance profiler to capture this iteration
 
+        self.logs.append({
+            "epoch": epoch,
+            "ts_fwd": epoch_logs[0]["ts_fwd"],
+            "ts_bwd": epoch_logs[0]["ts_bwd"],
+            "ts_opt": epoch_logs[0]["ts_opt"],
+            "ts_after": epoch_logs[0]["ts_after"],
+            "fwd_time": sum(e["fwd_time"] for e in epoch_logs),
+            "bwd_time": sum(e["bwd_time"] for e in epoch_logs),
+            "opt_time": sum(e["opt_time"] for e in epoch_logs),
+            "total": sum(e["total"] for e in epoch_logs),
+        })
+
     def train(self, max_epochs):
         self.profiler.start()
         for epoch in range(max_epochs):
             self._run_epoch(epoch)
         self.profiler.stop()
 
-    def save_logs(self, num_params, run_id):
+    def save_logs(self, num_params, run_id, data_size):
         log_dir = os.path.join("data", run_id)
         os.makedirs(log_dir, exist_ok=True)
         gb_val = 1 if self.grad_bucket else 0
         filepath = os.path.join(
-            log_dir, f"node-{self.global_rank}-gb-{gb_val}-param-{num_params}.csv"
+            log_dir, f"node-{self.global_rank}-gb-{gb_val}-param-{num_params}-data-{data_size}.csv"
         )
 
         headers = [
@@ -196,14 +210,15 @@ def main():
     parser.add_argument("--num_params", type=int, default=1000)
     parser.add_argument("--grad_as_bucket_view", action="store_true")
     parser.add_argument("--run_id", type=str, required=True)
+    parser.add_argument("--data_size", type=int, default=1000)
     args = parser.parse_args()
 
     init_process_group(backend="nccl")
 
     model, num_layers, input_dim = build_model(args.num_params)
-    prof = build_profiler(args.run_id, num_layers, args.grad_as_bucket_view)
-    dataset = MyTrainDataset(1024, input_dim)
-    train_data = DataLoader(dataset, batch_size=32, sampler=DistributedSampler(dataset))
+    prof = build_profiler(args.run_id, num_layers, args.grad_as_bucket_view, args.data_size)
+    dataset = MyTrainDataset(args.data_size, input_dim)
+    train_data = DataLoader(dataset, batch_size=100, sampler=DistributedSampler(dataset))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
     trainer = Trainer(
@@ -212,7 +227,7 @@ def main():
 
     print(f"Starting DDP on device: {int(os.environ['LOCAL_RANK'])}")
     trainer.train(args.epochs)
-    trainer.save_logs(args.num_params, args.run_id)
+    trainer.save_logs(args.num_params, args.run_id, args.data_size)
     destroy_process_group()
 
 

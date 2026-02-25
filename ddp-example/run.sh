@@ -81,7 +81,7 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
                     ddp.py $EPOCHS \
                     --num_params $params \
                     $bucket \
-                    $data_size \
+                    --data_size $data_size \
                     --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
 
             # Short sleep to allow sockets to clear

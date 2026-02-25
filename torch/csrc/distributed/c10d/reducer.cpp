@@ -899,14 +899,14 @@ void Reducer::mark_variable_ready(size_t variable_index) {
   if (bucket.expect_sparse_gradient) {
     mark_variable_ready_sparse(variable_index);
   } else {
-#ifdef USE_CUDA
+#ifdef USE_CUDA_1
     if (bucket.gradients.is_cuda()) {
       c10::cuda::getCurrentCUDAStream().synchronize();
     }
 #endif
     auto start = std::chrono::steady_clock::now();
     mark_variable_ready_dense(variable_index);
-#ifdef USE_CUDA
+#ifdef USE_CUDA_1
     if (bucket.gradients.is_cuda()) {
       c10::cuda::getCurrentCUDAStream().synchronize();
     }
@@ -1262,14 +1262,14 @@ void Reducer::initialize_buckets(
       // Checking just once won't catch if someone messes with
       // param layouts over time, but not messing with params after DDP
       // construction is already a documented constraint.
-#ifdef USE_CUDA
+#ifdef USE_CUDA_1
       if (bucket.gradients.is_cuda()) {
         c10::cuda::getCurrentCUDAStream().synchronize();
       }
 #endif
       auto start = std::chrono::steady_clock::now();
       initialize_bucket_views(bucket);
-#ifdef USE_CUDA
+#ifdef USE_CUDA_1
       if (bucket.gradients.is_cuda()) {
         c10::cuda::getCurrentCUDAStream().synchronize();
       }
@@ -1789,14 +1789,14 @@ void Reducer::finalize_backward() {
       // We don't need to finalize the sparse bucket since the sparse grad and
       // the bucket essentially point to the same storage. As a result, once
       // the allreduce is done, the sparse grads are automatically updated.
-#ifdef USE_CUDA
+#ifdef USE_CUDA_1
       if (bucket.gradients.is_cuda()) {
         c10::cuda::getCurrentCUDAStream().synchronize();
       }
 #endif
       auto start = std::chrono::steady_clock::now();
       finalize_bucket_dense(bucket);
-#ifdef USE_CUDA
+#ifdef USE_CUDA_1
       if (bucket.gradients.is_cuda()) {
         c10::cuda::getCurrentCUDAStream().synchronize();
       }

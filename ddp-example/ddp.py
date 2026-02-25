@@ -8,6 +8,9 @@ import torch.nn.functional as F
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
+from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
+import torch.distributed as dist
+
 
 
 class MyTrainDataset(Dataset):
@@ -64,8 +67,28 @@ def build_model(target_params):
     return torch.nn.Sequential(*layers), depth, input_dim
 
 
+def build_profiler(run_id, num_layers, grad_bucket):
+    log_dir = os.path.join("data", run_id)
+    os.makedirs(log_dir, exist_ok=True)
+    gb_val = 1 if grad_bucket else 0
+    tb_log_dir = os.path.join(
+        log_dir, f"profile-node-{dist.get_rank()}-gb-{gb_val}-layers-{num_layers}"
+    )
+
+    prof = profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        schedule=schedule(wait=2, warmup=2, active=6, repeat=1),
+        on_trace_ready=tensorboard_trace_handler(tb_log_dir),
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=False,   # set True if you want call stacks (slower)
+    )
+
+    return prof
+
+
 class Trainer:
-    def __init__(self, model, train_data, optimizer, grad_bucket, num_layers):
+    def __init__(self, model, train_data, optimizer, grad_bucket, num_layers, profiler):
         self.local_rank = int(os.environ["LOCAL_RANK"])
         self.global_rank = int(os.environ["RANK"])
         self.model = model.to(self.local_rank)
@@ -74,6 +97,7 @@ class Trainer:
         self.grad_bucket = grad_bucket
         self.num_layers = num_layers
         self.logs = []
+        self.profiler = profiler
 
         self.model = DDP(
             self.model,
@@ -82,6 +106,8 @@ class Trainer:
         )
 
     def _run_epoch(self, epoch):
+        rank = dist.get_rank() if dist.is_initialized() else 0
+
         self.train_data.sampler.set_epoch(epoch)
         for source, targets in self.train_data:
             source, targets = source.to(self.local_rank), targets.to(self.local_rank)
@@ -122,9 +148,13 @@ class Trainer:
                 }
             )
 
+            self.profiler.step()  # Advance profiler to capture this iteration
+
     def train(self, max_epochs):
+        self.profiler.start()
         for epoch in range(max_epochs):
             self._run_epoch(epoch)
+        self.profiler.stop()
 
     def save_logs(self, num_params, run_id):
         log_dir = os.path.join("data", run_id)
@@ -171,12 +201,13 @@ def main():
     init_process_group(backend="nccl")
 
     model, num_layers, input_dim = build_model(args.num_params)
+    prof = build_profiler(args.run_id, num_layers, args.grad_as_bucket_view)
     dataset = MyTrainDataset(1024, input_dim)
     train_data = DataLoader(dataset, batch_size=32, sampler=DistributedSampler(dataset))
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
     trainer = Trainer(
-        model, train_data, optimizer, args.grad_as_bucket_view, num_layers
+        model, train_data, optimizer, args.grad_as_bucket_view, num_layers, prof
     )
 
     print(f"Starting DDP on device: {int(os.environ['LOCAL_RANK'])}")

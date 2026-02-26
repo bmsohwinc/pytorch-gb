@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Run as:
-# bash run.sh <node_id> <start_exponent> <end_exponent> <start_data_exponent> <end_data_exponent>
+# bash run.sh <node_id> <start_exponent> <end_exponent> <start_data_exponent> <end_data_exponent> [mode] [ngpus]
 # node_id = 0 for master, 1 for worker, and so on
 # start_exponent = 1, 2, ... is starting parameter size treated as 2^start
 # end_exponent = 1, 2, ... is ending parameter size treated as 2^end
@@ -11,11 +11,21 @@
 # Define the experiment range (2^1 to 2^26)
 # 2^26 is ~67 million. 2^27 would exceed 10^8.
 
+# Multi:
+# bash run.sh 0 24 24 5 5 multi 1
+# bash run.sh 1 24 24 5 5 multi 1
+
+# Standalone:
+# bash run.sh 0 24 24 5 5 standalone 4
+
 NODE_RANK=$1  # Pass 0 for master, 1 for worker
 EXPO_START=$2
 EXPO_END=$3
 DATA_START=$4
 DATA_END=$5
+
+MODE=${6:-"multi"}          # "multi" or "standalone"
+NGPUS=${7:-1}               # number of GPUs per node (default 1)
 
 # Configuration
 MASTER_IP="IP1" # Replace with your Master's IP
@@ -72,7 +82,18 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
             echo "------------------------------------------------"
 
 
-            torchrun --nproc-per-node=1 \
+            if [ "$MODE" == "standalone" ]; then
+                torchrun \
+                    --standalone \
+                    --nproc-per-node=$NGPUS \
+                    ddp.py $EPOCHS \
+                    --num_params $params \
+                    $bucket \
+                    --data_size $data_size \
+                    --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
+            else
+                torchrun \
+                    --nproc-per-node=$NGPUS \
                     --nnodes=$NNODES \
                     --node-rank=$NODE_RANK \
                     --rdzv-id=123 \
@@ -83,6 +104,7 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
                     $bucket \
                     --data_size $data_size \
                     --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
+            fi
 
             # Short sleep to allow sockets to clear
             sleep 5

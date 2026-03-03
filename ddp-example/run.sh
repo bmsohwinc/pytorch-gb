@@ -27,11 +27,14 @@ DATA_END=$5
 MODE=${6:-"multi"}          # "multi" or "standalone"
 NGPUS=${7:-1}               # number of GPUs per node (default 1)
 
+UTIL_STEP=${8:-4}           # which global step to trace (default 6)
+UTIL_INTERVAL_MS=${9:-1}    # sampling period in ms (default 1)
+
 # Configuration
 MASTER_IP="IP1" # Replace with your Master's IP
 MASTER_PORT="29500"
 NNODES=2
-EPOCHS=2
+EPOCHS=1
 RUN_ID=$(date +"%Y%m%d_%H%M%S") # Generate timestamp ONCE here
 
 # Determine endpoint based on rank
@@ -83,6 +86,11 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
 
 
             if [ "$MODE" == "standalone" ]; then
+                # Start background nvidia-smi with 1ms looping interval
+                NVSMI_LOG="./data/${RUN_ID}/nvsmi-node-${NODE_RANK}-gb-${gb_val}-param-${params}-data-${data_size}.csv"
+                nvidia-smi --query-gpu=timestamp,name,utilization.gpu,utilization.memory,memory.total,memory.free,memory.used --format=csv -lms 1 > "$NVSMI_LOG" &
+                NVSMI_PID=$!
+
                 torchrun \
                     --standalone \
                     --nproc-per-node=$NGPUS \
@@ -90,8 +98,18 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
                     --num_params $params \
                     $bucket \
                     --data_size $data_size \
+                    --util_trace_step $UTIL_STEP \
+                    --util_interval_ms $UTIL_INTERVAL_MS \
                     --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
+                
+                # Stop the background nvidia-smi poll once torchrun is done
+                kill $NVSMI_PID 2>/dev/null
             else
+                # Start background nvidia-smi with 1ms looping interval
+                NVSMI_LOG="./data/${RUN_ID}/nvsmi-node-${NODE_RANK}-gb-${gb_val}-param-${params}-data-${data_size}.csv"
+                nvidia-smi --query-gpu=timestamp,name,utilization.gpu,utilization.memory,memory.total,memory.free,memory.used --format=csv -lms 1 > "$NVSMI_LOG" &
+                NVSMI_PID=$!
+
                 torchrun \
                     --nproc-per-node=$NGPUS \
                     --nnodes=$NNODES \
@@ -103,7 +121,12 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
                     --num_params $params \
                     $bucket \
                     --data_size $data_size \
+                    --util_trace_step $UTIL_STEP \
+                    --util_interval_ms $UTIL_INTERVAL_MS \
                     --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
+
+                # Stop the background nvidia-smi poll once torchrun is done
+                kill $NVSMI_PID 2>/dev/null
             fi
 
             # Short sleep to allow sockets to clear

@@ -12,6 +12,103 @@ from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trac
 import torch.distributed as dist
 
 
+import time, threading
+import psutil
+from pynvml import (
+    nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetUtilizationRates,
+    nvmlDeviceGetMemoryInfo
+)
+
+import csv
+
+def write_util_csv(samples, out_path):
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    if not samples:
+        return
+    keys = list(samples[0].keys())
+    with open(out_path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=keys)
+        w.writeheader()
+        w.writerows(samples)
+
+class UtilSampler:
+    def __init__(self, gpu_index=0, interval_ms=1):
+        self.gpu_index = gpu_index
+        self.interval_ns = int((interval_ms / 1000.0) * 1e9)
+        self.stop_evt = threading.Event()
+        self.samples = []
+        self.proc = psutil.Process()
+
+        nvmlInit()
+        self.h = nvmlDeviceGetHandleByIndex(gpu_index)
+        self.num_cores = psutil.cpu_count(logical=True)
+
+    def _snap(self, t_ns):
+        # CPU
+        cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
+        if cpu_per_core:
+            cpu_agg = sum(cpu_per_core) / len(cpu_per_core)
+        else:
+            cpu_agg = 0.0
+
+        vm = psutil.virtual_memory()
+        rss = self.proc.memory_info().rss
+
+        # GPU
+        util = nvmlDeviceGetUtilizationRates(self.h)
+        mem = nvmlDeviceGetMemoryInfo(self.h)
+
+        # PyTorch allocator stats (process-local, for this GPU)
+        try:
+            alloc = torch.cuda.memory_allocated(self.gpu_index)
+            reserv = torch.cuda.memory_reserved(self.gpu_index)
+            max_alloc = torch.cuda.max_memory_allocated(self.gpu_index)
+        except Exception:
+            alloc = reserv = max_alloc = -1
+
+        sample = {
+            "t_ns": t_ns,
+            "cpu_pct_agg": cpu_agg,
+        }
+        for i, pct in enumerate(cpu_per_core):
+            sample[f"cpu_core_{i}_pct"] = pct
+
+        sample.update({
+            "ram_used_bytes": vm.used,
+            "ram_avail_bytes": vm.available,
+            "proc_rss_bytes": rss,
+            "gpu_util_pct": util.gpu,
+            "gpu_mem_util_pct": util.memory,
+            "vram_used_bytes": mem.used,
+            "vram_total_bytes": mem.total,
+            "torch_alloc_bytes": alloc,
+            "torch_reserved_bytes": reserv,
+            "torch_max_alloc_bytes": max_alloc,
+        })
+        self.samples.append(sample)
+
+    def start(self):
+        # Warm-up for psutil.cpu_percent
+        psutil.cpu_percent(interval=None, percpu=True)
+
+        def run():
+            next_t = time.perf_counter_ns()
+            while not self.stop_evt.is_set():
+                now = time.perf_counter_ns()
+                if now >= next_t:
+                    self._snap(now)
+                    next_t += self.interval_ns
+                else:
+                    # Busy wait for guaranteed <1ms precision
+                    pass
+
+        self.th = threading.Thread(target=run, daemon=True)
+        self.th.start()
+
+    def stop(self):
+        self.stop_evt.set()
+        self.th.join()
+
 
 class MyTrainDataset(Dataset):
     def __init__(self, size, input_dim):
@@ -77,7 +174,7 @@ def build_profiler(run_id, num_layers, grad_bucket, data_size):
 
     prof = profile(
         activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-        schedule=schedule(wait=2, warmup=2, active=6, repeat=1),
+        schedule=schedule(wait=2, warmup=2, active=1), #, repeat=1),
         on_trace_ready=tensorboard_trace_handler(tb_log_dir),
         record_shapes=True,
         profile_memory=True,
@@ -88,7 +185,7 @@ def build_profiler(run_id, num_layers, grad_bucket, data_size):
 
 
 class Trainer:
-    def __init__(self, model, train_data, optimizer, grad_bucket, num_layers, profiler):
+    def __init__(self, model, train_data, optimizer, grad_bucket, num_layers, profiler, util_trace_step=-1, util_interval_ms=10, run_id="default"):
         self.local_rank = int(os.environ["LOCAL_RANK"])
         self.global_rank = int(os.environ["RANK"])
         self.model = model.to(self.local_rank)
@@ -98,6 +195,11 @@ class Trainer:
         self.num_layers = num_layers
         self.logs = []
         self.profiler = profiler
+        self.util_trace_step = util_trace_step
+        self.util_interval_ms = util_interval_ms
+        self.run_id = run_id
+        self.util_dumped = False
+        self.global_step = 0
 
         self.model = DDP(
             self.model,
@@ -113,6 +215,13 @@ class Trainer:
         self.train_data.sampler.set_epoch(epoch)
         for source, targets in self.train_data:
             source, targets = source.to(self.local_rank), targets.to(self.local_rank)
+
+            sampler = None
+            if (not self.util_dumped) and (self.util_trace_step >= 0) and (self.global_step == self.util_trace_step):
+                sampler = UtilSampler(gpu_index=self.local_rank, interval_ms=self.util_interval_ms)
+                sampler.start()
+                util_t0_ns = time.perf_counter_ns()
+
             #torch.cuda.synchronize()
             t0 = time.perf_counter()
             ts_fwd = time.time()
@@ -136,6 +245,29 @@ class Trainer:
             t3 = time.perf_counter()
             ts_after = time.time()
 
+            if sampler is not None:
+                util_t1_ns = time.perf_counter_ns()
+                sampler.stop()
+
+                gb_val = 1 if self.grad_bucket else 0
+                out_dir = os.path.join("data", self.run_id)
+                out_path = os.path.join(
+                    out_dir,
+                    f"util-node-{dist.get_rank()}-gb-{gb_val}-layers-{self.num_layers}-data-{len(self.train_data.dataset)}-step-{self.global_step}.csv"
+                )
+
+                # Add step window metadata into each sample (helps align later)
+                for s in sampler.samples:
+                    s["step"] = self.global_step
+                    s["step_t0_ns"] = util_t0_ns
+                    s["step_t1_ns"] = util_t1_ns
+
+                write_util_csv(sampler.samples, out_path)
+                if dist.get_rank() == 0:
+                    print(f"[util] wrote {len(sampler.samples)} samples to {out_path}")
+
+                self.util_dumped = True
+
             epoch_logs.append(
                 {
                     "epoch": epoch,
@@ -151,6 +283,7 @@ class Trainer:
             )
 
             self.profiler.step()  # Advance profiler to capture this iteration
+            self.global_step += 1
 
         self.logs.append({
             "epoch": epoch,
@@ -165,6 +298,11 @@ class Trainer:
         })
 
     def train(self, max_epochs):
+        # Explicitly flush the caching allocator and reset peak stats 
+        # to ensure a clean slate between sequential torchrun executions.
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
         self.profiler.start()
         for epoch in range(max_epochs):
             self._run_epoch(epoch)
@@ -210,6 +348,8 @@ def main():
     parser.add_argument("--num_params", type=int, default=1000)
     parser.add_argument("--grad_as_bucket_view", action="store_true")
     parser.add_argument("--data_size", type=int, default=1000)
+    parser.add_argument("--util_trace_step", type=int, default=-1)
+    parser.add_argument("--util_interval_ms", type=int, default=1)
     parser.add_argument("--run_id", type=str, required=True)
     args = parser.parse_args()
 
@@ -222,7 +362,10 @@ def main():
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
 
     trainer = Trainer(
-        model, train_data, optimizer, args.grad_as_bucket_view, num_layers, prof
+        model, train_data, optimizer, args.grad_as_bucket_view, num_layers, prof,
+        util_trace_step=args.util_trace_step,
+        util_interval_ms=args.util_interval_ms,
+        run_id=args.run_id,
     )
 
     print(f"Starting DDP on device: {int(os.environ['LOCAL_RANK'])}")

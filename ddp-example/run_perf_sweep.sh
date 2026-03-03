@@ -31,8 +31,9 @@ echo "  Output: ${SWEEP_DIR}"
 echo "=================================================="
 
 # CSV header for aggregated results
+# CSV header for aggregated results
 RESULTS_CSV="${SWEEP_DIR}/sweep_results.csv"
-echo "num_params,expo,bwd_gb0_mean,bwd_gb0_std,bwd_gb1_mean,bwd_gb1_std,bwd_improve_pct,iter_gb0_mean,iter_gb0_std,iter_gb1_mean,iter_gb1_std,iter_improve_pct,fwd_copy_gb0_mean,fwd_copy_gb1_mean,fwd_copy_improve_pct,rev_copy_gb0_mean,rev_copy_gb1_mean,rev_copy_improve_pct" > "$RESULTS_CSV"
+echo "num_params,expo,bwd_gb0_mean,bwd_gb0_std,bwd_gb1_mean,bwd_gb1_std,bwd_improve_pct,iter_gb0_mean,iter_gb0_std,iter_gb1_mean,iter_gb1_std,iter_improve_pct,fwd_copy_gb0_mean,fwd_copy_gb1_mean,fwd_copy_improve_pct,rev_copy_gb0_mean,rev_copy_gb1_mean,rev_copy_improve_pct,init_views_gb0_total,init_views_gb1_total" > "$RESULTS_CSV"
 
 for (( e=$EXPO_START; e<=$EXPO_END; e++ )); do
     PARAMS=$((2**e))
@@ -69,6 +70,7 @@ for (( e=$EXPO_START; e<=$EXPO_END; e++ )); do
     TOTAL_BMS=$(grep -c "bms#: DDP_BACKWARD: fwd_copy=" "$LOG_FILE" 2>/dev/null || echo 0)
     FWD_COPY_GB0="0"; FWD_COPY_GB1="0"; FWD_COPY_IMPROVE="0"
     REV_COPY_GB0="0"; REV_COPY_GB1="0"; REV_COPY_IMPROVE="0"
+    INIT_VIEWS_GB0="0"; INIT_VIEWS_GB1="0"
     if [ "$TOTAL_BMS" -gt "0" ]; then
         HALF=$((TOTAL_BMS / 2))
         # Forward copy (grad → bucket) during autograd hooks
@@ -83,9 +85,12 @@ for (( e=$EXPO_START; e<=$EXPO_END; e++ )); do
         if [ "$REV_COPY_GB0" -gt "0" ]; then
             REV_COPY_IMPROVE=$(awk "BEGIN {printf \"%.1f\", (($REV_COPY_GB0 - $REV_COPY_GB1) / $REV_COPY_GB0) * 100}")
         fi
+        # Init views (creating bucket views) during initialize_buckets
+        INIT_VIEWS_GB0=$(grep "bms#: DDP_BACKWARD: fwd_copy=" "$LOG_FILE" | head -n $HALF | sed 's/.*init_views=\([0-9]*\)us.*/\1/' | awk '{sum+=$1; n++} END {if(n>0) printf "%.0f", sum; else print 0}')
+        INIT_VIEWS_GB1=$(grep "bms#: DDP_BACKWARD: fwd_copy=" "$LOG_FILE" | tail -n $HALF | sed 's/.*init_views=\([0-9]*\)us.*/\1/' | awk '{sum+=$1; n++} END {if(n>0) printf "%.0f", sum; else print 0}')
     fi
 
-    echo "${PARAMS},${e},${BWD_GB0},${BWD_GB0_STD},${BWD_GB1},${BWD_GB1_STD},${BWD_IMPROVE},${ITER_GB0},${ITER_GB0_STD},${ITER_GB1},${ITER_GB1_STD},${ITER_IMPROVE},${FWD_COPY_GB0},${FWD_COPY_GB1},${FWD_COPY_IMPROVE},${REV_COPY_GB0},${REV_COPY_GB1},${REV_COPY_IMPROVE}" >> "$RESULTS_CSV"
+    echo "${PARAMS},${e},${BWD_GB0},${BWD_GB0_STD},${BWD_GB1},${BWD_GB1_STD},${BWD_IMPROVE},${ITER_GB0},${ITER_GB0_STD},${ITER_GB1},${ITER_GB1_STD},${ITER_IMPROVE},${FWD_COPY_GB0},${FWD_COPY_GB1},${FWD_COPY_IMPROVE},${REV_COPY_GB0},${REV_COPY_GB1},${REV_COPY_IMPROVE},${INIT_VIEWS_GB0},${INIT_VIEWS_GB1}" >> "$RESULTS_CSV"
 
     echo "  → Saved to $RESULTS_CSV"
 

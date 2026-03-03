@@ -1275,7 +1275,7 @@ void Reducer::initialize_buckets(
       }
 #endif
       auto end = std::chrono::steady_clock::now();
-      copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+      init_views_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     }
 
     // Map participating variables to this bucket.
@@ -1845,9 +1845,14 @@ void Reducer::finalize_backward() {
   for (const auto copy_time : reverse_copy_times_us_) {
     total_rev_copy_time += copy_time;
   }
-  std::cout << "bms#: DDP_BACKWARD: fwd_copy=" << total_fwd_copy_time << "us rev_copy=" << total_rev_copy_time << "us\n";
+  int64_t total_init_views_time = 0;
+  for (const auto copy_time : init_views_times_us_) {
+    total_init_views_time += copy_time;
+  }
+  std::cout << "bms#: DDP_BACKWARD: fwd_copy=" << total_fwd_copy_time << "us rev_copy=" << total_rev_copy_time << "us init_views=" << total_init_views_time << "us\n";
   copy_times_us_.clear();
   reverse_copy_times_us_.clear();
+  init_views_times_us_.clear();
 }
 
 void Reducer::runGradCallbackForVariable(

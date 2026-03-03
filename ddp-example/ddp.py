@@ -113,26 +113,26 @@ class Trainer:
         self.train_data.sampler.set_epoch(epoch)
         for source, targets in self.train_data:
             source, targets = source.to(self.local_rank), targets.to(self.local_rank)
-            #torch.cuda.synchronize()
+            torch.cuda.synchronize()
             t0 = time.perf_counter()
             ts_fwd = time.time()
 
             output = self.model(source)
             loss = F.mse_loss(output, targets)
 
-            #torch.cuda.synchronize()
+            torch.cuda.synchronize()
             t1 = time.perf_counter()
             ts_bwd = time.time()
 
             self.optimizer.zero_grad()
             loss.backward()
 
-            #torch.cuda.synchronize()
+            torch.cuda.synchronize()
             t2 = time.perf_counter()
             ts_opt = time.time()
 
             self.optimizer.step()
-            #torch.cuda.synchronize()
+            torch.cuda.synchronize()
             t3 = time.perf_counter()
             ts_after = time.time()
 

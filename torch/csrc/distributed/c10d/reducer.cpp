@@ -899,14 +899,14 @@ void Reducer::mark_variable_ready(size_t variable_index) {
   if (bucket.expect_sparse_gradient) {
     mark_variable_ready_sparse(variable_index);
   } else {
-#ifdef USE_CUDA_1
+#ifdef USE_CUDA
     if (bucket.gradients.is_cuda()) {
       c10::cuda::getCurrentCUDAStream().synchronize();
     }
 #endif
     auto start = std::chrono::steady_clock::now();
     mark_variable_ready_dense(variable_index);
-#ifdef USE_CUDA_1
+#ifdef USE_CUDA
     if (bucket.gradients.is_cuda()) {
       c10::cuda::getCurrentCUDAStream().synchronize();
     }
@@ -1262,14 +1262,14 @@ void Reducer::initialize_buckets(
       // Checking just once won't catch if someone messes with
       // param layouts over time, but not messing with params after DDP
       // construction is already a documented constraint.
-#ifdef USE_CUDA_1
+#ifdef USE_CUDA
       if (bucket.gradients.is_cuda()) {
         c10::cuda::getCurrentCUDAStream().synchronize();
       }
 #endif
       auto start = std::chrono::steady_clock::now();
       initialize_bucket_views(bucket);
-#ifdef USE_CUDA_1
+#ifdef USE_CUDA
       if (bucket.gradients.is_cuda()) {
         c10::cuda::getCurrentCUDAStream().synchronize();
       }
@@ -1789,20 +1789,20 @@ void Reducer::finalize_backward() {
       // We don't need to finalize the sparse bucket since the sparse grad and
       // the bucket essentially point to the same storage. As a result, once
       // the allreduce is done, the sparse grads are automatically updated.
-#ifdef USE_CUDA_1
+#ifdef USE_CUDA
       if (bucket.gradients.is_cuda()) {
         c10::cuda::getCurrentCUDAStream().synchronize();
       }
 #endif
       auto start = std::chrono::steady_clock::now();
       finalize_bucket_dense(bucket);
-#ifdef USE_CUDA_1
+#ifdef USE_CUDA
       if (bucket.gradients.is_cuda()) {
         c10::cuda::getCurrentCUDAStream().synchronize();
       }
 #endif
       auto end = std::chrono::steady_clock::now();
-      copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+      reverse_copy_times_us_.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     }
   }
 
@@ -1837,12 +1837,17 @@ void Reducer::finalize_backward() {
 
   sparse_metadata_.reset();
 
-  int64_t total_copy_time = 0;
+  int64_t total_fwd_copy_time = 0;
   for (const auto copy_time : copy_times_us_) {
-    total_copy_time += copy_time;
+    total_fwd_copy_time += copy_time;
   }
-  std::cout << "bms#: DDP_BACKWARD: copy=" << total_copy_time << "us\n";
+  int64_t total_rev_copy_time = 0;
+  for (const auto copy_time : reverse_copy_times_us_) {
+    total_rev_copy_time += copy_time;
+  }
+  std::cout << "bms#: DDP_BACKWARD: fwd_copy=" << total_fwd_copy_time << "us rev_copy=" << total_rev_copy_time << "us\n";
   copy_times_us_.clear();
+  reverse_copy_times_us_.clear();
 }
 
 void Reducer::runGradCallbackForVariable(

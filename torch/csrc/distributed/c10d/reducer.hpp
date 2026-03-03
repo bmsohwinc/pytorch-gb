@@ -204,6 +204,7 @@ class TORCH_API Reducer {
  protected:
 
   std::vector<int64_t> copy_times_us_;
+  std::vector<int64_t> reverse_copy_times_us_;
 
   // Forward declaration.
   struct Bucket;

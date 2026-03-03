@@ -45,7 +45,7 @@ fi
 # Enable verbose initialization and network logs
 export NCCL_DEBUG=INFO
 export NCCL_DEBUG_SUBSYS=INIT,NET
-export NCCL_SOCKET_IFNAME=enp94s0f0np0  # you get this name through ifconfig or ip addr commands
+export NCCL_SOCKET_IFNAME=enp161s0np0  # you get this name through ifconfig or ip addr commands
 
 # Force GDR even across the "SYS" (inter-socket) boundary
 # Level 5 = Enable GDR regardless of topology distance

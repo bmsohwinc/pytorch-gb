@@ -28,7 +28,7 @@ MODE=${6:-"multi"}          # "multi" or "standalone"
 NGPUS=${7:-1}               # number of GPUs per node (default 1)
 
 UTIL_STEP=${8:-4}           # which global step to trace (default 6)
-UTIL_INTERVAL_MS=${9:-1}    # sampling period in ms (default 1)
+UTIL_INTERVAL_MS=${9:-5}    # sampling period in ms (default 5)
 
 # Configuration
 MASTER_IP="IP1" # Replace with your Master's IP
@@ -48,7 +48,8 @@ fi
 # Enable verbose initialization and network logs
 export NCCL_DEBUG=INFO
 export NCCL_DEBUG_SUBSYS=INIT,NET
-export NCCL_SOCKET_IFNAME=enp94s0f0np0  # you get this name through ifconfig or ip addr commands
+# export NCCL_SOCKET_IFNAME=enp94s0f0np0  # you get this name through ifconfig or ip addr commands
+export NCCL_SOCKET_IFNAME=eno33np0
 
 # Force GDR even across the "SYS" (inter-socket) boundary
 # Level 5 = Enable GDR regardless of topology distance
@@ -86,11 +87,6 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
 
 
             if [ "$MODE" == "standalone" ]; then
-                # Start background nvidia-smi with 1ms looping interval
-                NVSMI_LOG="./data/${RUN_ID}/nvsmi-node-${NODE_RANK}-gb-${gb_val}-param-${params}-data-${data_size}.csv"
-                nvidia-smi --query-gpu=timestamp,name,utilization.gpu,utilization.memory,memory.total,memory.free,memory.used --format=csv -lms 1 > "$NVSMI_LOG" &
-                NVSMI_PID=$!
-
                 torchrun \
                     --standalone \
                     --nproc-per-node=$NGPUS \
@@ -101,15 +97,7 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
                     --util_trace_step $UTIL_STEP \
                     --util_interval_ms $UTIL_INTERVAL_MS \
                     --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
-                
-                # Stop the background nvidia-smi poll once torchrun is done
-                kill $NVSMI_PID 2>/dev/null
             else
-                # Start background nvidia-smi with 1ms looping interval
-                NVSMI_LOG="./data/${RUN_ID}/nvsmi-node-${NODE_RANK}-gb-${gb_val}-param-${params}-data-${data_size}.csv"
-                nvidia-smi --query-gpu=timestamp,name,utilization.gpu,utilization.memory,memory.total,memory.free,memory.used --format=csv -lms 1 > "$NVSMI_LOG" &
-                NVSMI_PID=$!
-
                 torchrun \
                     --nproc-per-node=$NGPUS \
                     --nnodes=$NNODES \
@@ -124,9 +112,6 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
                     --util_trace_step $UTIL_STEP \
                     --util_interval_ms $UTIL_INTERVAL_MS \
                     --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
-
-                # Stop the background nvidia-smi poll once torchrun is done
-                kill $NVSMI_PID 2>/dev/null
             fi
 
             # Short sleep to allow sockets to clear

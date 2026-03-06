@@ -94,6 +94,15 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
             echo "------------------------------------------------"
 
 
+            DCGM_MONITOR_PY="../../ExpertDNS/PythonScripts/dcgm_monitor.py"
+            DCGM_LOG="./data/${RUN_ID}/dcgm-node-${NODE_RANK}-gb-${gb_val}-param-${params}-data-${data_size}.csv"
+            # Calculate interval in seconds for dcgm_monitor.py (which expects float seconds)
+            INTERVAL_S=$(python3 -c "print($UTIL_INTERVAL_MS / 1000.0)")
+
+            echo "Starting DCGM monitoring: $DCGM_LOG (interval: ${INTERVAL_S}s)"
+            python3 "$DCGM_MONITOR_PY" -o "$DCGM_LOG" -i "$INTERVAL_S" &
+            DCGM_PID=$!
+
             if [ "$MODE" == "standalone" ]; then
                 torchrun \
                     --standalone \
@@ -121,6 +130,9 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
                     --util_interval_ms $UTIL_INTERVAL_MS \
                     --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
             fi
+
+            # Stop DCGM monitor
+            kill $DCGM_PID 2>/dev/null
 
             # Short sleep to allow sockets to clear
             sleep 5

@@ -46,18 +46,26 @@ fi
 
 
 # Enable verbose initialization and network logs
-export NCCL_DEBUG=INFO
-export NCCL_DEBUG_SUBSYS=INIT,NET
+# export NCCL_DEBUG=INFO
+# export NCCL_DEBUG_SUBSYS=INIT,NET
 # export NCCL_SOCKET_IFNAME=enp94s0f0np0  # you get this name through ifconfig or ip addr commands
-export NCCL_SOCKET_IFNAME=eno33np0
+# export NCCL_SOCKET_IFNAME=eno33np0
 
 # Force GDR even across the "SYS" (inter-socket) boundary
 # Level 5 = Enable GDR regardless of topology distance
-export NCCL_NET_GDR_LEVEL=5
+# export NCCL_NET_GDR_LEVEL=5
 
 # Optional: If using RoCE (as seen in your logs), ensure GID index is correct
 # (though NCCL usually finds this automatically)
 # export NCCL_IB_GID_INDEX=3
+
+export NCCL_DEBUG=INFO
+export NCCL_DEBUG_SUBSYS=INIT,NET,ENV
+export NCCL_SOCKET_IFNAME=eno33np0
+export NCCL_SOCKET_FAMILY=AF_INET
+export NCCL_IB_DISABLE=0
+export NCCL_IB_HCA=mlx5_0
+export NCCL_NET_GDR_LEVEL=0
 
 
 BUCKET_SETTINGS=("" "--grad_as_bucket_view")

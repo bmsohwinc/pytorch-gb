@@ -34,7 +34,7 @@ UTIL_INTERVAL_MS=${9:-5}    # sampling period in ms (default 5)
 MASTER_IP="IP1" # Replace with your Master's IP
 MASTER_PORT="29500"
 NNODES=2
-EPOCHS=1
+EPOCHS=10
 RUN_ID=$(date +"%Y%m%d_%H%M%S") # Generate timestamp ONCE here
 
 # Determine endpoint based on rank
@@ -97,7 +97,7 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
             DCGM_MONITOR_PY="../../ExpertDNS/PythonScripts/dcgm_monitor.py"
             DCGM_LOG="./data/${RUN_ID}/dcgm-node-${NODE_RANK}-gb-${gb_val}-param-${params}-data-${data_size}.csv"
             # Calculate interval in seconds for dcgm_monitor.py (which expects float seconds)
-            INTERVAL_S=$(python3 -c "print($UTIL_INTERVAL_MS / 1000.0)")
+            INTERVAL_S=$(python3 -c "print($UTIL_INTERVAL_MS / 10000.0)") # 0.5 ms = 500 us
 
             echo "Starting DCGM monitoring: $DCGM_LOG (interval: ${INTERVAL_S}s)"
             python3 "$DCGM_MONITOR_PY" -o "$DCGM_LOG" -i "$INTERVAL_S" &

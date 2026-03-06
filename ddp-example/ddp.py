@@ -21,6 +21,8 @@ from pynvml import (
 
 import csv
 
+USE_PROFILER = False
+
 def write_util_csv(samples, out_path):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     if not samples:
@@ -282,7 +284,8 @@ class Trainer:
                 }
             )
 
-            self.profiler.step()  # Advance profiler to capture this iteration
+            if USE_PROFILER:
+                self.profiler.step()  # Advance profiler to capture this iteration
             self.global_step += 1
 
         self.logs.append({
@@ -303,10 +306,13 @@ class Trainer:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
-        self.profiler.start()
+        
+        if USE_PROFILER:
+            self.profiler.start()
         for epoch in range(max_epochs):
             self._run_epoch(epoch)
-        self.profiler.stop()
+        if USE_PROFILER:
+            self.profiler.stop()
 
     def save_logs(self, num_params, run_id, data_size):
         log_dir = os.path.join("data", run_id)

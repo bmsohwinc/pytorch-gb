@@ -65,7 +65,7 @@ export NCCL_SOCKET_IFNAME=eno33np0
 export NCCL_SOCKET_FAMILY=AF_INET
 export NCCL_IB_DISABLE=0
 export NCCL_IB_HCA=mlx5_0
-export NCCL_NET_GDR_LEVEL=NODE
+export NCCL_NET_GDR_LEVEL=5
 
 
 BUCKET_SETTINGS=("" "--grad_as_bucket_view")

@@ -49,6 +49,8 @@ export NCCL_IB_DISABLE=0
 export NCCL_IB_HCA=mlx5_0
 export NCCL_NET_GDR_LEVEL=5
 
+export CUDA_VISIBLE_DEVICES=0
+
 # Optional stability helpers
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export PYTHONUNBUFFERED=1
@@ -78,7 +80,7 @@ run_case () {
     DCGM_PID=$!
 
     if [ "$MODE" == "standalone" ]; then
-        torchrun \
+        taskset -c 0-31,64-95 numactl --membind=0 torchrun \
             --standalone \
             --nproc-per-node="${NGPUS}" \
             resnet_ddp.py \
@@ -94,7 +96,7 @@ run_case () {
             ${GB_FLAG} \
             2>&1 | tee "${LOG_FILE}"
     else
-        torchrun \
+        taskset -c 0-31,64-95 numactl --membind=0 torchrun \
             --nproc-per-node="${NGPUS}" \
             --nnodes="${NNODES}" \
             --node-rank="${NODE_RANK}" \

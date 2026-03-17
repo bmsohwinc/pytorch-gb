@@ -67,6 +67,8 @@ export NCCL_IB_DISABLE=0
 export NCCL_IB_HCA=mlx5_0
 export NCCL_NET_GDR_LEVEL=5
 
+export CUDA_VISIBLE_DEVICES=0
+
 
 BUCKET_SETTINGS=("" "--grad_as_bucket_view")
 
@@ -104,7 +106,7 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
             DCGM_PID=$!
 
             if [ "$MODE" == "standalone" ]; then
-                torchrun \
+                taskset -c 0-31,64-95 numactl --membind=0 torchrun \
                     --standalone \
                     --nproc-per-node=$NGPUS \
                     ddp.py $EPOCHS \
@@ -115,7 +117,7 @@ for (( i=$EXPO_START; i<=$EXPO_END; i++ )); do
                     --util_interval_ms $UTIL_INTERVAL_MS \
                     --run_id "$RUN_ID" 2>&1 | tee "$LOG_FILE"
             else
-                torchrun \
+                taskset -c 0-31,64-95 numactl --membind=0 torchrun \
                     --nproc-per-node=$NGPUS \
                     --nnodes=$NNODES \
                     --node-rank=$NODE_RANK \

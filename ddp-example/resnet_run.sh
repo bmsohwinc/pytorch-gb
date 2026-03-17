@@ -72,7 +72,7 @@ run_case () {
         torchrun \
             --standalone \
             --nproc-per-node="${NGPUS}" \
-            ddp.py \
+            resnet_ddp.py \
             --data_dir "${DATA_DIR}" \
             --run_id "${RUN_ID}" \
             --model "${MODEL}" \
@@ -92,7 +92,7 @@ run_case () {
             --rdzv-id=123 \
             --rdzv-backend=c10d \
             --rdzv-endpoint=$ENDPOINT \
-            ddp.py \
+            resnet_ddp.py \
             --data_dir "${DATA_DIR}" \
             --run_id "${RUN_ID}" \
             --model "${MODEL}" \

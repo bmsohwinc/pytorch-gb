@@ -20,10 +20,24 @@ from pynvml import (
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
-from torchvision import datasets, transforms
 
 from load_model import build_model, count_parameters
 
+from torch.utils.data import Dataset
+
+
+class SyntheticImageDataset(Dataset):
+    def __init__(self, size: int, num_classes: int = 10):
+        self.size = size
+        self.num_classes = num_classes
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx):
+        x = torch.randn(3, 32, 32)
+        y = torch.randint(0, self.num_classes, (1,)).item()
+        return x, y
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -115,40 +129,12 @@ def cleanup_ddp():
     destroy_process_group()
 
 
-def build_dataloaders(data_dir: str, batch_size: int, num_workers: int):
-    train_tfms = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=(0.4914, 0.4822, 0.4465),
-            std=(0.2023, 0.1994, 0.2010),
-        ),
-    ])
+def build_dataloaders(data_dir, batch_size: int, num_workers: int):
+    train_ds = SyntheticImageDataset(size=50000)
+    test_ds = SyntheticImageDataset(size=10000)
 
-    test_tfms = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=(0.4914, 0.4822, 0.4465),
-            std=(0.2023, 0.1994, 0.2010),
-        ),
-    ])
-
-    train_ds = datasets.CIFAR10(
-        root=data_dir,
-        train=True,
-        download=True,
-        transform=train_tfms,
-    )
-    test_ds = datasets.CIFAR10(
-        root=data_dir,
-        train=False,
-        download=True,
-        transform=test_tfms,
-    )
-
-    train_sampler = DistributedSampler(train_ds, shuffle=True, drop_last=False)
-    test_sampler = DistributedSampler(test_ds, shuffle=False, drop_last=False)
+    train_sampler = DistributedSampler(train_ds, shuffle=True)
+    test_sampler = DistributedSampler(test_ds, shuffle=False)
 
     train_loader = DataLoader(
         train_ds,
@@ -158,6 +144,7 @@ def build_dataloaders(data_dir: str, batch_size: int, num_workers: int):
         pin_memory=True,
         persistent_workers=(num_workers > 0),
     )
+
     test_loader = DataLoader(
         test_ds,
         batch_size=batch_size,
@@ -166,8 +153,8 @@ def build_dataloaders(data_dir: str, batch_size: int, num_workers: int):
         pin_memory=True,
         persistent_workers=(num_workers > 0),
     )
-    return train_loader, test_loader
 
+    return train_loader, test_loader
 
 def reduce_scalar(value: float, device: torch.device) -> float:
     t = torch.tensor([value], dtype=torch.float64, device=device)

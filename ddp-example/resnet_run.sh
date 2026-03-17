@@ -3,20 +3,20 @@ set -euo pipefail
 
 # Usage:
 #   Multi-node:
-#     bash run.sh <node_rank> <master_ip> [mode] [ngpus]
+#     bash run.sh <node_rank> [mode] [ngpus]
 #
 #   Examples:
-#     bash run.sh 0 10.10.1.1 multi 1
-#     bash run.sh 1 10.10.1.1 multi 1
+#     bash run.sh 0 multi 1
+#     bash run.sh 1 multi 1
 #
 #   Standalone:
-#     bash run.sh 0 127.0.0.1 standalone 1
+#     bash run.sh 0 standalone 1
 
 NODE_RANK=${1:?need node rank}
-MASTER_IP=${2:?need master ip}
-MODE=${3:-multi}
-NGPUS=${4:-1}
+MODE=${2:-multi}
+NGPUS=${3:-1}
 
+MASTER_IP="IP1"
 MASTER_PORT=29500
 NNODES=2
 
@@ -29,6 +29,15 @@ LR=0.1
 DATA_DIR="./datasets"
 UTIL_INTERVAL_MS=5
 RUN_ID=$(date +"%Y%m%d_%H%M%S")
+
+
+# Determine endpoint based on rank
+if [ "$NODE_RANK" -eq 0 ]; then
+    ENDPOINT="localhost:$MASTER_PORT"
+else
+    ENDPOINT="$MASTER_IP:$MASTER_PORT"
+fi
+
 
 mkdir -p "./data/${RUN_ID}"
 
@@ -82,7 +91,7 @@ run_case () {
             --node-rank="${NODE_RANK}" \
             --rdzv-id=123 \
             --rdzv-backend=c10d \
-            --rdzv-endpoint="${MASTER_IP}:${MASTER_PORT}" \
+            --rdzv-endpoint=$ENDPOINT \
             ddp.py \
             --data_dir "${DATA_DIR}" \
             --run_id "${RUN_ID}" \

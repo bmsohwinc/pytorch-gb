@@ -128,7 +128,9 @@ def benchmark_run(
         for x, y in loader:
             x, y = x.to(device), y.to(device)
 
-            optimizer.zero_grad()
+            # Keep grads allocated so gradient_as_bucket_view can preserve the
+            # grad↔bucket alias after the first iteration.
+            optimizer.zero_grad(set_to_none=False)
 
             torch.cuda.synchronize()
             t_start = time.perf_counter()

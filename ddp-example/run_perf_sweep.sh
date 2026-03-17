@@ -8,6 +8,7 @@
 # Usage:
 #   bash run_perf_sweep.sh
 #   bash run_perf_sweep.sh 20 26   # exponents from 2^20 to 2^26
+#   NGPUS=2 bash run_perf_sweep.sh 20 26   # 2 GPUs on one machine
 # ──────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -27,6 +28,7 @@ NGPUS=${NGPUS:-1}
 echo "=================================================="
 echo "  Parameter Sweep: Gradient Bucket View"
 echo "  Range: 2^${EXPO_START} to 2^${EXPO_END}"
+echo "  GPUs: ${NGPUS}"
 echo "  Output: ${SWEEP_DIR}"
 echo "=================================================="
 
@@ -66,29 +68,22 @@ for (( e=$EXPO_START; e<=$EXPO_END; e++ )); do
     ITER_GB1_STD=$(grep "gb=1 :" "$LOG_FILE" | tail -1 | awk '{print $5}')
     ITER_IMPROVE=$(grep "Improvement" "$LOG_FILE" | tail -1 | awk '{print $3}' | tr -d '%+')
 
-    # Parse fwd_copy and rev_copy times from bms# lines
-    TOTAL_BMS=$(grep -c "bms#: DDP_BACKWARD: fwd_copy=" "$LOG_FILE" 2>/dev/null || echo 0)
-    FWD_COPY_GB0="0"; FWD_COPY_GB1="0"; FWD_COPY_IMPROVE="0"
-    REV_COPY_GB0="0"; REV_COPY_GB1="0"; REV_COPY_IMPROVE="0"
-    INIT_VIEWS_GB0="0"; INIT_VIEWS_GB1="0"
-    if [ "$TOTAL_BMS" -gt "0" ]; then
-        HALF=$((TOTAL_BMS / 2))
-        # Forward copy (grad → bucket) during autograd hooks
-        FWD_COPY_GB0=$(grep "bms#: DDP_BACKWARD: fwd_copy=" "$LOG_FILE" | head -n $HALF | sed 's/.*fwd_copy=\([0-9]*\)us.*/\1/' | awk '{sum+=$1; n++} END {if(n>0) printf "%.0f", sum/n; else print 0}')
-        FWD_COPY_GB1=$(grep "bms#: DDP_BACKWARD: fwd_copy=" "$LOG_FILE" | tail -n $HALF | sed 's/.*fwd_copy=\([0-9]*\)us.*/\1/' | awk '{sum+=$1; n++} END {if(n>0) printf "%.0f", sum/n; else print 0}')
-        if [ "$FWD_COPY_GB0" -gt "0" ]; then
-            FWD_COPY_IMPROVE=$(awk "BEGIN {printf \"%.1f\", (($FWD_COPY_GB0 - $FWD_COPY_GB1) / $FWD_COPY_GB0) * 100}")
-        fi
-        # Reverse copy (bucket → grad) during finalize_backward
-        REV_COPY_GB0=$(grep "bms#: DDP_BACKWARD: fwd_copy=" "$LOG_FILE" | head -n $HALF | sed 's/.*rev_copy=\([0-9]*\)us.*/\1/' | awk '{sum+=$1; n++} END {if(n>0) printf "%.0f", sum/n; else print 0}')
-        REV_COPY_GB1=$(grep "bms#: DDP_BACKWARD: fwd_copy=" "$LOG_FILE" | tail -n $HALF | sed 's/.*rev_copy=\([0-9]*\)us.*/\1/' | awk '{sum+=$1; n++} END {if(n>0) printf "%.0f", sum/n; else print 0}')
-        if [ "$REV_COPY_GB0" -gt "0" ]; then
-            REV_COPY_IMPROVE=$(awk "BEGIN {printf \"%.1f\", (($REV_COPY_GB0 - $REV_COPY_GB1) / $REV_COPY_GB0) * 100}")
-        fi
-        # Init views (creating bucket views) during initialize_buckets
-        INIT_VIEWS_GB0=$(grep "bms#: DDP_BACKWARD: fwd_copy=" "$LOG_FILE" | head -n $HALF | sed 's/.*init_views=\([0-9]*\)us.*/\1/' | awk '{sum+=$1; n++} END {if(n>0) printf "%.0f", sum; else print 0}')
-        INIT_VIEWS_GB1=$(grep "bms#: DDP_BACKWARD: fwd_copy=" "$LOG_FILE" | tail -n $HALF | sed 's/.*init_views=\([0-9]*\)us.*/\1/' | awk '{sum+=$1; n++} END {if(n>0) printf "%.0f", sum; else print 0}')
-    fi
+    eval "$(
+        python3 "${SCRIPT_DIR}/parse_bms_log.py" \
+            --log-file "$LOG_FILE" \
+            --warmup "$WARMUP" \
+            --iters "$ITERS" \
+            --world-size "$NGPUS"
+    )"
+
+    FWD_COPY_GB0=${FWD_COPY_GB0_MEAN}
+    FWD_COPY_GB1=${FWD_COPY_GB1_MEAN}
+    FWD_COPY_IMPROVE=${FWD_COPY_IMPROVE_PCT}
+    REV_COPY_GB0=${REV_COPY_GB0_MEAN}
+    REV_COPY_GB1=${REV_COPY_GB1_MEAN}
+    REV_COPY_IMPROVE=${REV_COPY_IMPROVE_PCT}
+    INIT_VIEWS_GB0=${INIT_VIEWS_GB0_TOTAL}
+    INIT_VIEWS_GB1=${INIT_VIEWS_GB1_TOTAL}
 
     echo "${PARAMS},${e},${BWD_GB0},${BWD_GB0_STD},${BWD_GB1},${BWD_GB1_STD},${BWD_IMPROVE},${ITER_GB0},${ITER_GB0_STD},${ITER_GB1},${ITER_GB1_STD},${ITER_IMPROVE},${FWD_COPY_GB0},${FWD_COPY_GB1},${FWD_COPY_IMPROVE},${REV_COPY_GB0},${REV_COPY_GB1},${REV_COPY_IMPROVE},${INIT_VIEWS_GB0},${INIT_VIEWS_GB1}" >> "$RESULTS_CSV"
 

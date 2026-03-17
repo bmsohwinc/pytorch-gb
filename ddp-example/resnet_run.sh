@@ -69,7 +69,7 @@ run_case () {
     rm -f snapshot.pt
 
     DCGM_MONITOR_PY="../../ExpertDNS/PythonScripts/dcgm_monitor.py"
-    DCGM_LOG="./data/${RUN_ID}/dcgm-node-${NODE_RANK}-gb-${gb_val}-model-${MODEL}.csv"
+    DCGM_LOG="./data/${RUN_ID}/dcgm-node-${NODE_RANK}-gb-${GB_VAL}-model-${MODEL}.csv"
     # Calculate interval in seconds for dcgm_monitor.py (which expects float seconds)
     INTERVAL_S=$(python3 -c "print($UTIL_INTERVAL_MS / 5000.0)") # 1 ms
 

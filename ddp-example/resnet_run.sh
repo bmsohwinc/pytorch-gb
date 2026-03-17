@@ -50,6 +50,17 @@ export NCCL_IB_HCA=mlx5_0
 export NCCL_NET_GDR_LEVEL=5
 
 export CUDA_VISIBLE_DEVICES=0
+if [ "$NODE_RANK" -eq 0 ]; then
+    CPUSET="0-31,64-95"
+    MEMNODE="0"
+elif [ "$NODE_RANK" -eq 1 ]; then
+    CPUSET="16-19,80-83"
+    MEMNODE="4"
+else
+    echo "Unsupported NODE_RANK=$NODE_RANK"
+    exit 1
+fi
+
 
 # Optional stability helpers
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
@@ -80,7 +91,7 @@ run_case () {
     DCGM_PID=$!
 
     if [ "$MODE" == "standalone" ]; then
-        taskset -c 0-31,64-95 numactl --membind=0 torchrun \
+        taskset -c "${CPUSET}" numactl --membind="${MEMNODE}" torchrun \
             --standalone \
             --nproc-per-node="${NGPUS}" \
             resnet_ddp.py \
@@ -96,7 +107,7 @@ run_case () {
             ${GB_FLAG} \
             2>&1 | tee "${LOG_FILE}"
     else
-        taskset -c 0-31,64-95 numactl --membind=0 torchrun \
+        taskset -c "${CPUSET}" numactl --membind="${MEMNODE}" torchrun \
             --nproc-per-node="${NGPUS}" \
             --nnodes="${NNODES}" \
             --node-rank="${NODE_RANK}" \

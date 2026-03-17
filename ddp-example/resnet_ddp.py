@@ -25,6 +25,8 @@ from load_model import build_model, count_parameters
 
 from torch.utils.data import Dataset
 
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
 
 class SyntheticImageDataset(Dataset):
     def __init__(self, size: int, num_classes: int = 10):

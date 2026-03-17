@@ -68,6 +68,15 @@ run_case () {
 
     rm -f snapshot.pt
 
+    DCGM_MONITOR_PY="../../ExpertDNS/PythonScripts/dcgm_monitor.py"
+    DCGM_LOG="./data/${RUN_ID}/dcgm-node-${NODE_RANK}-gb-${gb_val}-model-${MODEL}.csv"
+    # Calculate interval in seconds for dcgm_monitor.py (which expects float seconds)
+    INTERVAL_S=$(python3 -c "print($UTIL_INTERVAL_MS / 5000.0)") # 1 ms
+
+    echo "Starting DCGM monitoring: $DCGM_LOG (interval: ${INTERVAL_S}s)"
+    python3 "$DCGM_MONITOR_PY" -o "$DCGM_LOG" -i "$INTERVAL_S" &
+    DCGM_PID=$!
+
     if [ "$MODE" == "standalone" ]; then
         torchrun \
             --standalone \
@@ -106,7 +115,10 @@ run_case () {
             2>&1 | tee "${LOG_FILE}"
     fi
 
-    sleep 5
+    # Stop DCGM monitor
+    kill $DCGM_PID 2>/dev/null
+
+    sleep 8
 }
 
 # Case 1: gradient_as_bucket_view = False

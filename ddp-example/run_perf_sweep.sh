@@ -9,6 +9,8 @@
 #   bash run_perf_sweep.sh
 #   bash run_perf_sweep.sh 20 26   # exponents from 2^20 to 2^26
 #   NGPUS=2 bash run_perf_sweep.sh 20 26   # 2 GPUs on one machine
+#   NNODES=2 NODE_RANK=0 MASTER_ADDR=node0 MASTER_PORT=29500 NGPUS=2 bash run_perf_sweep.sh 20 26
+#   NNODES=2 NODE_RANK=1 MASTER_ADDR=node0 MASTER_PORT=29500 NGPUS=2 bash run_perf_sweep.sh 20 26
 # ──────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -24,36 +26,69 @@ EXPO_END=${2:-28}     # 2^26 = 67M params
 WARMUP=10
 ITERS=50
 NGPUS=${NGPUS:-1}
+NNODES=${NNODES:-1}
+NODE_RANK=${NODE_RANK:-0}
+MASTER_ADDR=${MASTER_ADDR:-127.0.0.1}
+MASTER_PORT=${MASTER_PORT:-29500}
+IS_PRIMARY_NODE=0
+if [ "$NODE_RANK" -eq 0 ]; then
+    IS_PRIMARY_NODE=1
+fi
 
-echo "=================================================="
-echo "  Parameter Sweep: Gradient Bucket View"
-echo "  Range: 2^${EXPO_START} to 2^${EXPO_END}"
-echo "  GPUs: ${NGPUS}"
-echo "  Output: ${SWEEP_DIR}"
-echo "=================================================="
+TORCHRUN_ARGS=(--nproc-per-node="$NGPUS")
+if [ "$NNODES" -eq 1 ]; then
+    TORCHRUN_ARGS+=(--standalone)
+else
+    TORCHRUN_ARGS+=(
+        --nnodes="$NNODES"
+        --node-rank="$NODE_RANK"
+        --master-addr="$MASTER_ADDR"
+        --master-port="$MASTER_PORT"
+    )
+fi
 
-# CSV header for aggregated results
+if [ "$IS_PRIMARY_NODE" -eq 1 ]; then
+    echo "=================================================="
+    echo "  Parameter Sweep: Gradient Bucket View"
+    echo "  Range: 2^${EXPO_START} to 2^${EXPO_END}"
+    echo "  Nodes: ${NNODES}"
+    echo "  This node rank: ${NODE_RANK}"
+    echo "  GPUs per node: ${NGPUS}"
+    echo "  Output: ${SWEEP_DIR}"
+    if [ "$NNODES" -gt 1 ]; then
+        echo "  Rendezvous: ${MASTER_ADDR}:${MASTER_PORT}"
+    fi
+    echo "=================================================="
+fi
+
 # CSV header for aggregated results
 RESULTS_CSV="${SWEEP_DIR}/sweep_results.csv"
-echo "num_params,expo,bwd_gb0_mean,bwd_gb0_std,bwd_gb1_mean,bwd_gb1_std,bwd_improve_pct,iter_gb0_mean,iter_gb0_std,iter_gb1_mean,iter_gb1_std,iter_improve_pct,fwd_copy_gb0_mean,fwd_copy_gb1_mean,fwd_copy_improve_pct,rev_copy_gb0_mean,rev_copy_gb1_mean,rev_copy_improve_pct,init_views_gb0_total,init_views_gb1_total" > "$RESULTS_CSV"
+if [ "$IS_PRIMARY_NODE" -eq 1 ]; then
+    echo "num_params,expo,bwd_gb0_mean,bwd_gb0_std,bwd_gb1_mean,bwd_gb1_std,bwd_improve_pct,iter_gb0_mean,iter_gb0_std,iter_gb1_mean,iter_gb1_std,iter_improve_pct,fwd_copy_gb0_mean,fwd_copy_gb1_mean,fwd_copy_improve_pct,rev_copy_gb0_mean,rev_copy_gb1_mean,rev_copy_improve_pct,init_views_gb0_total,init_views_gb1_total" > "$RESULTS_CSV"
+fi
 
 for (( e=$EXPO_START; e<=$EXPO_END; e++ )); do
     PARAMS=$((2**e))
-    LOG_FILE="${SWEEP_DIR}/params_2e${e}_${PARAMS}.log"
+    LOG_FILE="${SWEEP_DIR}/params_2e${e}_${PARAMS}_node${NODE_RANK}.log"
 
-    echo ""
-    echo "──────────────────────────────────────────────"
-    echo "  Running 2^${e} = ${PARAMS} parameters"
-    echo "──────────────────────────────────────────────"
+    if [ "$IS_PRIMARY_NODE" -eq 1 ]; then
+        echo ""
+        echo "──────────────────────────────────────────────"
+        echo "  Running 2^${e} = ${PARAMS} parameters"
+        echo "──────────────────────────────────────────────"
+    fi
 
-    python3 -m torch.distributed.run \
-        --standalone \
-        --nproc-per-node=$NGPUS \
+    torchrun \
+        "${TORCHRUN_ARGS[@]}" \
         "${SCRIPT_DIR}/test_gb_perf.py" \
         --num_params $PARAMS \
         --warmup $WARMUP \
         --iters $ITERS \
         2>&1 | tee "$LOG_FILE"
+
+    if [ "$IS_PRIMARY_NODE" -ne 1 ]; then
+        continue
+    fi
 
     # Parse results from the log
     BWD_GB0=$(grep "gb=0 :" "$LOG_FILE" | head -1 | awk '{print $3}')
@@ -93,12 +128,17 @@ for (( e=$EXPO_START; e<=$EXPO_END; e++ )); do
     sleep 3
 done
 
-echo ""
-echo "=================================================="
-echo "  Sweep complete!"
-echo "  Results CSV: ${RESULTS_CSV}"
-echo "  Individual logs: ${SWEEP_DIR}/"
-echo "=================================================="
-echo ""
-echo "To plot results, run:"
-echo "  python3 ${SCRIPT_DIR}/plot_sweep.py ${RESULTS_CSV}"
+if [ "$IS_PRIMARY_NODE" -eq 1 ]; then
+    echo ""
+    echo "=================================================="
+    echo "  Sweep complete!"
+    echo "  Results CSV: ${RESULTS_CSV}"
+    echo "  Individual logs: ${SWEEP_DIR}/"
+    if [ "$NNODES" -gt 1 ]; then
+        echo "  Note: CSV parsing uses this node's local log only."
+    fi
+    echo "=================================================="
+    echo ""
+    echo "To plot results, run:"
+    echo "  python3 ${SCRIPT_DIR}/plot_sweep.py ${RESULTS_CSV}"
+fi
